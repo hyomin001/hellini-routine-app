@@ -267,6 +267,40 @@ st.markdown(
     html, body, .stApp, section.main, .main .block-container {
         overflow-x: hidden !important;
     }
+
+    /* ===== 세트 입력 행(N세트 · 무게 · 횟수) : flex 비율 계산 대신
+       CSS Grid로 확실하게 폭을 3등분해서 절대 화면을 넘어가지 않게 고정 =====
+       (원본 HTML의 .set-row { display:grid; grid-template-columns:32px 1fr 1fr; } 와 동일한 방식) */
+    div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] {
+        display: grid !important;
+        grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1fr) !important;
+        gap: 8px !important;
+        width: 100% !important;
+    }
+    div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        width: auto !important;
+        min-width: 0 !important;
+    }
+
+    /* ===== 상단 네비게이션 버튼 줄 : 버튼 개수에 상관없이 항상 균등하게 화면 폭 안에서 나눔 ===== */
+    div[class*="st-key-navrow_"] div[data-testid="stHorizontalBlock"] {
+        display: grid !important;
+        grid-auto-flow: column !important;
+        grid-auto-columns: minmax(0, 1fr) !important;
+        gap: 8px !important;
+        width: 100% !important;
+    }
+    div[class*="st-key-navrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        width: auto !important;
+        min-width: 0 !important;
+    }
+    div[class*="st-key-navrow_"] .stButton > button {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        padding-left: 2px !important;
+        padding-right: 2px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -348,12 +382,13 @@ def render_topnav(user: dict, admin: bool) -> str:
     chunk = 3
     for i in range(0, len(pages), chunk):
         row = pages[i : i + chunk]
-        cols = st.columns(len(row))
-        for col, (key, label) in zip(cols, row):
-            btn_type = "primary" if key == current else "secondary"
-            if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
-                st.session_state["page"] = key
-                st.rerun()
+        with st.container(key=f"navrow_{i}"):
+            cols = st.columns(len(row))
+            for col, (key, label) in zip(cols, row):
+                btn_type = "primary" if key == current else "secondary"
+                if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+                    st.session_state["page"] = key
+                    st.rerun()
 
     total = db.get_total_user_count()
     active = db.get_active_user_count()
@@ -468,16 +503,17 @@ def render_today(user: dict):
                     new_sets = []
                     for i in range(ex["sets"]):
                         s = sets_state[i] if i < len(sets_state) else {"w": "", "r": ""}
-                        c1, c2, c3 = st.columns([0.9, 1.5, 1.5])
-                        c1.markdown(f"<div style='padding-top:8px; font-size:13px; color:#9296A0;'>{i+1}세트</div>", unsafe_allow_html=True)
-                        w_val = c2.text_input(
-                            "무게", value=str(s.get("w", "")), key=f"{base_key}_w_{i}",
-                            label_visibility="collapsed", placeholder="kg",
-                        )
-                        r_val = c3.text_input(
-                            "횟수", value=str(s.get("r", "")), key=f"{base_key}_r_{i}",
-                            label_visibility="collapsed", placeholder="회",
-                        )
+                        with st.container(key=f"setrow_{base_key}_{i}"):
+                            c1, c2, c3 = st.columns([0.9, 1.5, 1.5])
+                            c1.markdown(f"<div style='padding-top:10px; font-size:12px; color:#9296A0; white-space:nowrap;'>{i+1}세트</div>", unsafe_allow_html=True)
+                            w_val = c2.text_input(
+                                "무게", value=str(s.get("w", "")), key=f"{base_key}_w_{i}",
+                                label_visibility="collapsed", placeholder="kg",
+                            )
+                            r_val = c3.text_input(
+                                "횟수", value=str(s.get("r", "")), key=f"{base_key}_r_{i}",
+                                label_visibility="collapsed", placeholder="회",
+                            )
                         new_sets.append({"w": w_val, "r": r_val})
 
                     render_rest_timer()
