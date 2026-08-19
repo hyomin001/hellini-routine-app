@@ -2,6 +2,7 @@
 import datetime as dt
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from utils import db
 from utils.data import DAYS, exercises_for_day, ALL_EXERCISE_NAMES
@@ -24,6 +25,118 @@ DAY_COLORS = {
     "DAY3": "#5AFF9F",
     "DAY4": "#FF5A9F",
 }
+
+
+def render_rest_timer():
+    """60/90/120초 휴식 타이머. 버튼 클릭도 이 위젯 안에서 순수 JS로 처리되므로
+    Streamlit 새로고침 없이 그 자리에서 바로 카운트다운된다 (원본 HTML의 타이머와 동일 동작)."""
+    html = """
+    <style>
+      body{margin:0;padding:0;background:transparent;font-family:'Inter',sans-serif;}
+      .rt-row{display:flex; gap:8px; margin:4px 0;}
+      .rt-btn{
+        flex:1; min-width:0; background:#23262C; border:1px solid #33373F; color:#F2F1EC;
+        font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600;
+        padding:10px 2px; border-radius:8px; cursor:pointer;
+      }
+      .rt-btn:active{background:#2B2F36;}
+      .rt-bar{display:none; margin-top:6px;}
+      .rt-bar.show{display:block;}
+      .rt-inner{
+        background:#23262C; border:1px solid #FFC834; border-radius:999px;
+        padding:8px 10px 8px 14px; display:flex; align-items:center; gap:8px;
+      }
+      .rt-time{font-family:'JetBrains Mono',monospace; font-weight:700; color:#FFC834; font-size:14px; min-width:38px;}
+      .rt-track{flex:1; height:5px; border-radius:99px; background:#2B2F36; overflow:hidden;}
+      .rt-fill{height:100%; background:#FFC834; border-radius:99px; width:100%; transition:width 1s linear;}
+      .rt-round{
+        width:26px; height:26px; border-radius:50%; border:none; background:#2B2F36; color:#F2F1EC;
+        display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px; flex-shrink:0;
+      }
+      .rt-msg{text-align:center; font-size:12px; color:#B9E6B9; margin-top:4px; min-height:14px;}
+    </style>
+    <div class="rt-row">
+      <button class="rt-btn" data-rest="60">⏱ 60초 휴식</button>
+      <button class="rt-btn" data-rest="90">⏱ 90초 휴식</button>
+      <button class="rt-btn" data-rest="120">⏱ 120초 휴식</button>
+    </div>
+    <div class="rt-bar" id="restBar">
+      <div class="rt-inner">
+        <button class="rt-round" id="restMinus">-15</button>
+        <div class="rt-time" id="restTime">0:00</div>
+        <div class="rt-track"><div class="rt-fill" id="restFill"></div></div>
+        <button class="rt-round" id="restPlus">+15</button>
+        <button class="rt-round" id="restStop">×</button>
+      </div>
+      <div class="rt-msg" id="restMsg"></div>
+    </div>
+    <script>
+      const restTimer = {total:0, remaining:0, interval:null};
+      document.querySelectorAll('[data-rest]').forEach(function(btn){
+        btn.addEventListener('click', function(){ startRest(parseInt(btn.dataset.rest)); });
+      });
+      function startRest(seconds){
+        clearInterval(restTimer.interval);
+        restTimer.total = seconds;
+        restTimer.remaining = seconds;
+        document.getElementById('restBar').classList.add('show');
+        document.getElementById('restMsg').textContent = '';
+        updateUI();
+        restTimer.interval = setInterval(function(){
+          restTimer.remaining--;
+          if(restTimer.remaining<=0){
+            clearInterval(restTimer.interval);
+            restTimer.remaining = 0;
+            updateUI();
+            onDone();
+            return;
+          }
+          updateUI();
+        }, 1000);
+      }
+      function updateUI(){
+        const m = Math.floor(restTimer.remaining/60);
+        const s = restTimer.remaining%60;
+        document.getElementById('restTime').textContent = m+':'+String(s).padStart(2,'0');
+        const pct = restTimer.total>0 ? Math.max(0, restTimer.remaining/restTimer.total*100) : 0;
+        document.getElementById('restFill').style.width = pct+'%';
+      }
+      function stopRest(){
+        clearInterval(restTimer.interval);
+        restTimer.remaining = 0;
+        document.getElementById('restBar').classList.remove('show');
+      }
+      function adjustRest(delta){
+        if(restTimer.total<=0) return;
+        restTimer.remaining = Math.max(0, restTimer.remaining+delta);
+        if(restTimer.remaining > restTimer.total) restTimer.total = restTimer.remaining;
+        updateUI();
+      }
+      function onDone(){
+        document.getElementById('restMsg').textContent = '휴식 끝! 다음 세트 가보자 💪';
+        if(navigator.vibrate) navigator.vibrate([200,100,200]);
+        beep();
+        setTimeout(stopRest, 2500);
+      }
+      function beep(){
+        try{
+          const ctx = new (window.AudioContext||window.webkitAudioContext)();
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type='sine'; o.frequency.value=880;
+          o.connect(g); g.connect(ctx.destination);
+          g.gain.setValueAtTime(0.0001, ctx.currentTime);
+          g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime+0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.6);
+          o.start(); o.stop(ctx.currentTime+0.6);
+        }catch(e){}
+      }
+      document.getElementById('restMinus').addEventListener('click', function(){ adjustRest(-15); });
+      document.getElementById('restPlus').addEventListener('click', function(){ adjustRest(15); });
+      document.getElementById('restStop').addEventListener('click', stopRest);
+    </script>
+    """
+    components.html(html, height=150, scrolling=False)
 
 # ================= 커스텀 스타일 (원본 HTML 다크 테마 톤 맞춤) =================
 st.markdown(
@@ -111,6 +224,15 @@ st.markdown(
             padding: 6px 8px !important;
             font-size: 14px !important;
         }
+        /* 컬럼 사이 간격 축소 (세트 입력, 상단 네비 버튼 등) */
+        div[data-testid="stHorizontalBlock"] {
+            gap: 0.5rem !important;
+        }
+        /* DAY 탭 라벨 축소 */
+        button[data-baseweb="tab"] {
+            font-size: 12.5px !important;
+            padding: 8px 10px !important;
+        }
     }
     </style>
     """,
@@ -177,17 +299,17 @@ def render_auth():
 
 # ================= 상단 네비게이션 (버튼식) =================
 NAV_PAGES = [
-    ("today", "🏠 오늘의 루틴"),
-    ("mypage", "📖 마이페이지"),
+    ("today", "🏠 오늘"),
+    ("mypage", "📖 기록"),
     ("ranking", "🏆 랭킹"),
-    ("contact", "💬 문의하기"),
+    ("contact", "💬 문의"),
 ]
 
 
 def render_topnav(user: dict, admin: bool) -> str:
     db.touch_presence(user["id"], user["username"], user["nickname"])
 
-    pages = NAV_PAGES + ([("admin", "🛠️ 관리자")] if admin else [])
+    pages = NAV_PAGES + ([("admin", "🛠️ 관리")] if admin else [])
     current = st.session_state.get("page", "today")
 
     chunk = 3
@@ -311,14 +433,14 @@ def render_today(user: dict):
                     st.markdown("**세트 기록**")
 
                     new_sets = []
-                    cols_header = st.columns([1, 2, 2])
+                    cols_header = st.columns([0.7, 1.6, 1.6])
                     cols_header[0].markdown("**세트**")
                     cols_header[1].markdown("**무게(kg)**")
                     cols_header[2].markdown("**횟수**")
                     for i in range(ex["sets"]):
                         s = sets_state[i] if i < len(sets_state) else {"w": "", "r": ""}
-                        c1, c2, c3 = st.columns([1, 2, 2])
-                        c1.markdown(f"{i+1}세트")
+                        c1, c2, c3 = st.columns([0.7, 1.6, 1.6])
+                        c1.markdown(f"<div style='padding-top:8px;'>{i+1}</div>", unsafe_allow_html=True)
                         w_val = c2.text_input(
                             "무게", value=str(s.get("w", "")), key=f"{base_key}_w_{i}",
                             label_visibility="collapsed", placeholder="kg",
@@ -328,6 +450,8 @@ def render_today(user: dict):
                             label_visibility="collapsed", placeholder="회",
                         )
                         new_sets.append({"w": w_val, "r": r_val})
+
+                    render_rest_timer()
 
                     memo_val = st.text_input(
                         "메모", value=memo_state, key=f"{base_key}_memo",
