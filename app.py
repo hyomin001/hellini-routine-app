@@ -376,39 +376,31 @@ NAV_PAGES = [
 def render_topnav(user: dict, admin: bool) -> str:
     db.touch_presence(user["id"], user["username"], user["nickname"])
 
+    # 1. 페이지 목록 마지막에 로그아웃을 추가합니다.
     pages = NAV_PAGES + ([("admin", "🛠️ 관리")] if admin else [])
+    pages.append(("logout", "로그아웃")) 
+    
     current = st.session_state.get("page", "today")
 
-    # 1번째 줄: 오늘, 기록, 랭킹 (3개)
-    row1_pages = pages[:3]
-    with st.container(key="navrow_0"):
-        cols1 = st.columns(len(row1_pages))
-        for col, (key, label) in zip(cols1, row1_pages):
-            btn_type = "primary" if key == current else "secondary"
-            if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
-                st.session_state["page"] = key
-                st.rerun()
+    chunk = 3
+    for i in range(0, len(pages), chunk):
+        row = pages[i : i + chunk]
+        with st.container(key=f"navrow_{i}"):
+            cols = st.columns(len(row))
+            for col, (key, label) in zip(cols, row):
+                # 2. 키값이 logout일 때만 삭제 로직을 실행하도록 분기 처리합니다.
+                if key == "logout":
+                    if col.button(label, key="nav_logout", use_container_width=True):
+                        del st.session_state["user"]
+                        st.session_state.pop("page", None)
+                        st.rerun()
+                else:
+                    btn_type = "primary" if key == current else "secondary"
+                    if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+                        st.session_state["page"] = key
+                        st.rerun()
 
-    # 2번째 줄: 문의, (관리자면 관리 추가), 로그아웃
-    row2_pages = pages[3:]
-    with st.container(key="navrow_1"):
-        # 로그아웃 버튼을 넣을 컬럼을 1개 더 추가합니다.
-        cols2 = st.columns(len(row2_pages) + 1)
-        
-        # 문의(및 관리) 버튼 렌더링
-        for col, (key, label) in zip(cols2[:-1], row2_pages):
-            btn_type = "primary" if key == current else "secondary"
-            if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
-                st.session_state["page"] = key
-                st.rerun()
-                
-        # 마지막 컬럼에 로그아웃 버튼 배치
-        if cols2[-1].button("로그아웃", key="nav_logout", use_container_width=True):
-            del st.session_state["user"]
-            st.session_state.pop("page", None)
-            st.rerun()
-
-    # 안내 문구는 밀림 현상 방지를 위해 버튼 아래 전체 너비로 단독 배치
+    # 3. 버튼을 밀어내던 안내 문구는 가장 아래에 단독으로 넓게 배치합니다.
     total = db.get_total_user_count()
     active = db.get_active_user_count()
     admin_tag = " · 🛡️ 관리자" if admin else ""
