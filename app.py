@@ -234,6 +234,18 @@ st.markdown(
             padding: 8px 10px !important;
         }
     }
+
+    /* ===== Streamlit이 좁은 화면에서 컬럼(가로배치)을 세로로 쌓아버리는 기본 동작을 막는다 =====
+       (세트/무게/횟수, 상단 메뉴 버튼 등이 세로로 길게 쌓이는 걸 방지) */
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        align-items: flex-start !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        width: auto !important;
+        min-width: 0 !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -433,14 +445,10 @@ def render_today(user: dict):
                     st.markdown("**세트 기록**")
 
                     new_sets = []
-                    cols_header = st.columns([0.7, 1.6, 1.6])
-                    cols_header[0].markdown("**세트**")
-                    cols_header[1].markdown("**무게(kg)**")
-                    cols_header[2].markdown("**횟수**")
                     for i in range(ex["sets"]):
                         s = sets_state[i] if i < len(sets_state) else {"w": "", "r": ""}
-                        c1, c2, c3 = st.columns([0.7, 1.6, 1.6])
-                        c1.markdown(f"<div style='padding-top:8px;'>{i+1}</div>", unsafe_allow_html=True)
+                        c1, c2, c3 = st.columns([0.9, 1.5, 1.5])
+                        c1.markdown(f"<div style='padding-top:8px; font-size:13px; color:#9296A0;'>{i+1}세트</div>", unsafe_allow_html=True)
                         w_val = c2.text_input(
                             "무게", value=str(s.get("w", "")), key=f"{base_key}_w_{i}",
                             label_visibility="collapsed", placeholder="kg",
