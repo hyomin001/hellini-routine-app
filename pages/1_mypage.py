@@ -38,12 +38,4 @@ with tab_history:
             entries = by_date[date_str]
             with st.expander(f"{date_str} · 운동 {len(entries)}개"):
                 for e in entries:
-                    valid = [s for s in e["sets"] if s.get("w") not in (None, "") and s.get("r") not in (None, "")]
-                    sets_txt = " / ".join(f"{s['w']}kg×{s['r']}회" for s in valid) if valid else "기록 없음"
-                    st.markdown(f"**{e['exercise_name']}**  \n{sets_txt}")
-                    if e.get("memo"):
-                        st.caption(f"메모: {e['memo']}")
-                    if st.button("삭제", key=f"del_{e['_id']}"):
-                        db.delete_log(user["id"], e["date"], e["exercise_name"])
-                        st.rerun()
-                    st.markdown("---")
+                    ui.render_log_entry_editable(user, e)
