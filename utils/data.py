@@ -18,10 +18,12 @@ for _e in EX:
     _e["img_path"] = os.path.join(_ASSETS_DIR, f"{_e['img']}.jpg")
 
 DAYS = [
-    {"key": "DAY1", "label": "DAY 1", "part": "가슴·삼두·어깨"},
-    {"key": "DAY2", "label": "DAY 2", "part": "등·이두·후면어깨"},
-    {"key": "DAY3", "label": "DAY 3", "part": "하체·엉덩이·복근"},
-    {"key": "DAY4", "label": "DAY 4", "part": "어깨·팔"},
+    # key는 DB에 이미 저장된 기록과의 호환을 위해 "DAY1"~"DAY4" 형태를 그대로 유지하고,
+    # 화면에 보이는 label만 "DAY"(요일 느낌) 대신 부위 중심 이름으로 바꾼다.
+    {"key": "DAY1", "label": "부위 1", "part": "가슴·삼두·어깨"},
+    {"key": "DAY2", "label": "부위 2", "part": "등·이두·후면어깨"},
+    {"key": "DAY3", "label": "부위 3", "part": "하체·엉덩이·복근"},
+    {"key": "DAY4", "label": "부위 4", "part": "어깨·팔"},
 ]
 
 EX_BY_NAME = {}
