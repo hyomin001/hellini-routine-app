@@ -5,7 +5,17 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from utils import db
+from utils import ui
 from utils.data import DAYS, exercises_for_day, ALL_EXERCISE_NAMES
+
+# Streamlit Cloud 서버는 UTC 기준으로 동작하므로 dt.date.today()를 그대로 쓰면
+# 한국시간(UTC+9) 새벽 0~9시 사이에는 아직 "어제" 날짜가 반환된다.
+# 항상 한국시간(KST) 기준 오늘 날짜를 쓰도록 고정한다.
+KST = dt.timezone(dt.timedelta(hours=9))
+
+
+def today_kst() -> dt.date:
+    return dt.datetime.now(KST).date()
 
 st.set_page_config(page_title="헬린이 루틴", page_icon="🏋️", layout="centered")
 
@@ -411,14 +421,14 @@ def render_topnav(user: dict, admin: bool) -> str:
 
 # ================= 오늘의 루틴 =================
 def render_today(user: dict):
-    selected_date = st.date_input("날짜", value=dt.date.today(), key="today_date")
+    selected_date = st.date_input("날짜", value=today_kst(), key="today_date")
     date_str = selected_date.isoformat()
 
     st.markdown(
         "<div style='background:#1B1D22; border:1px solid #33373F; border-radius:8px; "
         "padding:10px 12px; font-size:12.5px; color:#9296A0; margin:10px 0 18px;'>"
         "✓ 모든 무게는 마지막 2~3개가 <b style='color:#FFC834;'>매우 힘들 정도</b>로 진행하세요. "
-        "주 4회가 힘들면 DAY 순서(사이클)만 지켜서 따라하면 됩니다."
+        "주 4회가 힘들면 부위 순서(사이클)만 지켜서 따라하면 됩니다."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -565,15 +575,7 @@ def render_mypage(user: dict):
                 entries = by_date[date_str]
                 with st.expander(f"{date_str} · 운동 {len(entries)}개"):
                     for e in entries:
-                        valid = [s for s in e["sets"] if s.get("w") not in (None, "") and s.get("r") not in (None, "")]
-                        sets_txt = " / ".join(f"{s['w']}kg×{s['r']}회" for s in valid) if valid else "기록 없음"
-                        st.markdown(f"**{e['exercise_name']}**  \n{sets_txt}")
-                        if e.get("memo"):
-                            st.caption(f"메모: {e['memo']}")
-                        if st.button("삭제", key=f"del_{e['_id']}"):
-                            db.delete_log(user["id"], e["date"], e["exercise_name"])
-                            st.rerun()
-                        st.markdown("---")
+                        ui.render_log_entry_editable(user, e)
 
 
 # ================= 랭킹 =================
