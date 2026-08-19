@@ -241,23 +241,10 @@ st.markdown(
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         align-items: flex-start !important;
-        width: 100% !important;
     }
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        flex: 1 1 0 !important;
-        width: 0 !important;   /* 내용 길이와 상관없이 화면 폭 안에서 강제로 줄어들게 함 */
+        width: auto !important;
         min-width: 0 !important;
-    }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] * {
-        min-width: 0 !important;
-        max-width: 100% !important;
-    }
-    div[data-testid="stTextInput"] input {
-        width: 100% !important;
-        box-sizing: border-box !important;
-    }
-    .block-container, .stApp {
-        overflow-x: hidden !important;
     }
     </style>
     """,
