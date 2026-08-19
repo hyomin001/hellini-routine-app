@@ -74,6 +74,44 @@ st.markdown(
         background:#1E241E; border:1px solid #2E3E2E; color:#B9E6B9;
         border-radius:10px; padding:10px 12px; font-size:13px; margin:8px 0;
     }
+
+    .exercise-thumb {
+        width: 100%;
+        max-width: 220px;
+        border-radius: 12px;
+        margin-bottom: 8px;
+    }
+
+    /* ===== 모바일(폰 세로 화면) 최적화 ===== */
+    @media (max-width: 480px) {
+        .block-container {
+            padding-left: 0.9rem !important;
+            padding-right: 0.9rem !important;
+            padding-top: 1.2rem !important;
+        }
+        /* 버튼 터치 영역 확보 */
+        .stButton > button {
+            min-height: 42px;
+            font-size: 13.5px !important;
+            padding: 6px 6px !important;
+        }
+        /* 상단 네비게이션/문구 폰트 축소로 줄바꿈 방지 */
+        .stCaption, [data-testid="stCaptionContainer"] {
+            font-size: 12px !important;
+        }
+        div[data-testid="stExpander"] summary {
+            font-size: 14.5px;
+            padding: 10px 12px;
+        }
+        .progress-chip { font-size: 11px; padding: 3px 9px; }
+        .day-badge { font-size: 10.5px; padding: 2px 8px; }
+        .exercise-thumb { max-width: 100%; }
+        /* 텍스트 입력 인풋 여백 축소로 세트 입력 3열이 덜 답답하게 */
+        div[data-testid="stTextInput"] input {
+            padding: 6px 8px !important;
+            font-size: 14px !important;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -237,23 +275,20 @@ def render_today(user: dict):
                 pr_txt = f" · 🏅 {pr['weight']:g}kg × {pr['reps']}회" if pr else ""
 
                 with st.expander(f"{'✅ ' if is_complete else ''}{ex['name']}{pr_txt}"):
-                    img_col, info_col = st.columns([1, 2])
-                    with img_col:
-                        try:
-                            st.image(ex["img_path"], use_container_width=True)
-                        except Exception:
-                            pass
-                    with info_col:
+                    try:
+                        st.image(ex["img_path"], width=220)
+                    except Exception:
+                        pass
+                    st.markdown(
+                        f"<div class='equip-line'>🎯 {ex['sets']}세트 · {ex['reps']}</div>"
+                        f"<div class='equip-line'>🛠️ {ex['equip']}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if pr:
                         st.markdown(
-                            f"<div class='equip-line'>🎯 {ex['sets']}세트 · {ex['reps']}</div>"
-                            f"<div class='equip-line'>🛠️ {ex['equip']}</div>",
+                            f"<div class='pr-line'>🏅 최고기록 {pr['weight']:g}kg × {pr['reps']}회</div>",
                             unsafe_allow_html=True,
                         )
-                        if pr:
-                            st.markdown(
-                                f"<div class='pr-line'>🏅 최고기록 {pr['weight']:g}kg × {pr['reps']}회</div>",
-                                unsafe_allow_html=True,
-                            )
 
                     if ex.get("howto"):
                         with st.container():
