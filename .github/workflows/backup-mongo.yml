@@ -1,0 +1,42 @@
+name: MongoDB 자동 백업
+
+on:
+  schedule:
+    - cron: "0 15 * * *"   # UTC 15:00 = KST 00:00
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: pip install pymongo dnspython
+
+      - name: MongoDB 백업 실행
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          MONGO_DB_NAME: ${{ secrets.MONGO_DB_NAME }}
+        run: python scripts/backup_mongo.py
+
+      - name: 변경사항 커밋 및 푸시
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backups/
+          if git diff --cached --quiet; then
+            echo "전날과 데이터 변경 없음, 커밋 생략"
+          else
+            git commit -m "chore: 자동 백업 $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
