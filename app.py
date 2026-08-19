@@ -241,10 +241,31 @@ st.markdown(
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         align-items: flex-start !important;
+        width: 100% !important;
     }
+    /* width:auto로 강제하면 버튼/인풋 원래 크기만큼 각 컬럼이 늘어나서
+       화면 폭을 넘어가버림(가로 스크롤 발생). min-width만 0으로 풀어주고
+       실제 너비는 Streamlit이 계산한 비율(flex-basis)을 그대로 따르게 해서
+       화면 안에서 비율대로 줄어들도록 한다. */
     div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        width: auto !important;
         min-width: 0 !important;
+        flex-shrink: 1 !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
+        min-width: 0 !important;
+    }
+    /* 인풋/버튼이 내부에서 컬럼 폭을 넘어가지 않도록 */
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stTextInput"],
+    .stButton, .stButton > button {
+        min-width: 0 !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+    /* 만에 하나 안쪽에서 넘치는 요소가 있어도 화면 자체가
+       가로로 스크롤되지 않게 최종 안전장치 */
+    html, body, .stApp, section.main, .main .block-container {
+        overflow-x: hidden !important;
     }
     </style>
     """,
