@@ -4,6 +4,7 @@ import datetime as dt
 import streamlit as st
 
 from utils import db
+from utils import ui
 from utils.data import DAYS, exercises_for_day
 
 st.set_page_config(page_title="헬린이 루틴", page_icon="🏋️", layout="centered")
@@ -131,19 +132,10 @@ def render_auth():
 
 # ================= 오늘의 루틴 =================
 def render_today(user: dict):
-    st.markdown("### 🏋️ 헬린이 루틴")
+    db.touch_presence(user["id"], user["username"], user["nickname"])
+    ui.render_sidebar(user)
 
-    with st.sidebar:
-        st.markdown(f"### 👋 {user['nickname']}님")
-        st.caption(f"@{user['username']}")
-        if st.button("로그아웃", use_container_width=True):
-            del st.session_state["user"]
-            st.rerun()
-        st.divider()
-        st.page_link("app.py", label="🏠 오늘의 루틴")
-        st.page_link("pages/1_mypage.py", label="📖 마이페이지")
-        st.page_link("pages/2_ranking.py", label="🏆 랭킹")
-        st.page_link("pages/3_contact.py", label="💬 문의하기")
+    st.markdown("### 🏋️ 헬린이 루틴")
 
     selected_date = st.date_input("날짜", value=dt.date.today(), key="today_date")
     date_str = selected_date.isoformat()
