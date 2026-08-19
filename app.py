@@ -365,6 +365,7 @@ def render_auth():
 
 
 # ================= 상단 네비게이션 (버튼식) =================
+# ================= 상단 네비게이션 (버튼식) =================
 NAV_PAGES = [
     ("today", "🏠 오늘"),
     ("mypage", "📖 기록"),
@@ -372,37 +373,49 @@ NAV_PAGES = [
     ("contact", "💬 문의"),
 ]
 
-
 def render_topnav(user: dict, admin: bool) -> str:
     db.touch_presence(user["id"], user["username"], user["nickname"])
 
     pages = NAV_PAGES + ([("admin", "🛠️ 관리")] if admin else [])
     current = st.session_state.get("page", "today")
 
-    chunk = 3
-    for i in range(0, len(pages), chunk):
-        row = pages[i : i + chunk]
-        with st.container(key=f"navrow_{i}"):
-            cols = st.columns(len(row))
-            for col, (key, label) in zip(cols, row):
-                btn_type = "primary" if key == current else "secondary"
-                if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
-                    st.session_state["page"] = key
-                    st.rerun()
+    # 1번째 줄: 오늘, 기록, 랭킹 (3개)
+    row1_pages = pages[:3]
+    with st.container(key="navrow_0"):
+        cols1 = st.columns(len(row1_pages))
+        for col, (key, label) in zip(cols1, row1_pages):
+            btn_type = "primary" if key == current else "secondary"
+            if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+                st.session_state["page"] = key
+                st.rerun()
 
+    # 2번째 줄: 문의, (관리자면 관리 추가), 로그아웃
+    row2_pages = pages[3:]
+    with st.container(key="navrow_1"):
+        # 로그아웃 버튼을 넣을 컬럼을 1개 더 추가합니다.
+        cols2 = st.columns(len(row2_pages) + 1)
+        
+        # 문의(및 관리) 버튼 렌더링
+        for col, (key, label) in zip(cols2[:-1], row2_pages):
+            btn_type = "primary" if key == current else "secondary"
+            if col.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+                st.session_state["page"] = key
+                st.rerun()
+                
+        # 마지막 컬럼에 로그아웃 버튼 배치
+        if cols2[-1].button("로그아웃", key="nav_logout", use_container_width=True):
+            del st.session_state["user"]
+            st.session_state.pop("page", None)
+            st.rerun()
+
+    # 안내 문구는 밀림 현상 방지를 위해 버튼 아래 전체 너비로 단독 배치
     total = db.get_total_user_count()
     active = db.get_active_user_count()
     admin_tag = " · 🛡️ 관리자" if admin else ""
-    c1, c2 = st.columns([3, 1])
-    c1.caption(f"👋 {user['nickname']}님{admin_tag} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명")
-    if c2.button("로그아웃", key="nav_logout", use_container_width=True):
-        del st.session_state["user"]
-        st.session_state.pop("page", None)
-        st.rerun()
+    st.caption(f"👋 {user['nickname']}님{admin_tag} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명")
 
     st.divider()
     return current
-
 
 # ================= 오늘의 루틴 =================
 def render_today(user: dict):
