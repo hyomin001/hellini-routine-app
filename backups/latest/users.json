@@ -1,0 +1,26 @@
+[
+  {
+    "_id": "6a8538f8048f34947b54eab9",
+    "username": "hyomin",
+    "salt": "f63a2144241b6010922e8d2e0907c571",
+    "pw_hash": "3186a6bf9bf2d9b1ccae590f1f6191155eaeab43867275d0278bd14d5d950b04",
+    "nickname": "김효민",
+    "created_at": "2026-08-19T05:02:48.193000"
+  },
+  {
+    "_id": "6a85464702a83ee58d08504a",
+    "username": "admin",
+    "salt": "924973c97dfcfa9e6d4d9ff3d2e2991c",
+    "pw_hash": "35cc628059224677e190eb35f88fc1845a5e9ae04e822a9c85f6f35e7d8fb5e8",
+    "nickname": "관리",
+    "created_at": "2026-08-19T05:59:35.339000"
+  },
+  {
+    "_id": "6a854ab602a83ee58d08504b",
+    "username": "olivia003io",
+    "salt": "bd45e814b50fa32506b5b59344ea7fbf",
+    "pw_hash": "623e753f91111b0d4d34dbe73b858ad10cc5bb574b7ca9bf660cef0344ea95fb",
+    "nickname": "율공듀",
+    "created_at": "2026-08-19T06:18:30.384000"
+  }
+]
