@@ -141,9 +141,9 @@ def render_today(user: dict):
             st.rerun()
         st.divider()
         st.page_link("app.py", label="🏠 오늘의 루틴")
-        st.page_link("pages/1_마이페이지.py", label="📖 마이페이지")
-        st.page_link("pages/2_랭킹.py", label="🏆 랭킹")
-        st.page_link("pages/3_문의하기.py", label="💬 문의하기")
+        st.page_link("pages/1_mypage.py", label="📖 마이페이지")
+        st.page_link("pages/2_ranking.py", label="🏆 랭킹")
+        st.page_link("pages/3_contact.py", label="💬 문의하기")
 
     selected_date = st.date_input("날짜", value=dt.date.today(), key="today_date")
     date_str = selected_date.isoformat()
