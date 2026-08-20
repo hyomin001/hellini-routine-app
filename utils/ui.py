@@ -55,6 +55,34 @@ def render_sidebar(user: dict):
     return admin
 
 
+_LOG_HISTORY_CSS = """
+<style>
+/* ===== 마이페이지 기록 히스토리의 수정/삭제 버튼 줄 : 항상 2등분해서 화면 밖으로 넘어가지 않게 ===== */
+div[class*="st-key-logbtns_"] div[data-testid="stHorizontalBlock"],
+div[class*="st-key-logeditbtns_"] div[data-testid="stHorizontalBlock"] {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100% !important;
+}
+div[class*="st-key-logbtns_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+div[class*="st-key-logeditbtns_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+    width: auto !important;
+    min-width: 0 !important;
+}
+div[class*="st-key-logbtns_"] .stButton > button,
+div[class*="st-key-logeditbtns_"] .stButton > button {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 12.5px !important;
+    padding: 5px 4px !important;
+    min-height: 36px !important;
+}
+</style>
+"""
+
+
 def render_log_entry_editable(user: dict, e: dict):
     """마이페이지 '기록 히스토리'의 운동 기록 한 줄.
 
@@ -73,13 +101,14 @@ def render_log_entry_editable(user: dict, e: dict):
         if e.get("memo"):
             st.caption(f"메모: {e['memo']}")
 
-        c1, c2 = st.columns(2)
-        if c1.button("✏️ 수정", key=f"edit_{entry_id}", use_container_width=True):
-            st.session_state[edit_key] = True
-            st.rerun()
-        if c2.button("🗑️ 삭제", key=f"del_{entry_id}", use_container_width=True):
-            db.delete_log(user["id"], e["date"], e["exercise_name"])
-            st.rerun()
+        with st.container(key=f"logbtns_{entry_id}"):
+            c1, c2 = st.columns(2)
+            if c1.button("✏️ 수정", key=f"edit_{entry_id}", use_container_width=True):
+                st.session_state[edit_key] = True
+                st.rerun()
+            if c2.button("🗑️ 삭제", key=f"del_{entry_id}", use_container_width=True):
+                db.delete_log(user["id"], e["date"], e["exercise_name"])
+                st.rerun()
     else:
         st.markdown(f"**{e['exercise_name']}** 수정 중")
         new_sets = []
@@ -101,14 +130,39 @@ def render_log_entry_editable(user: dict, e: dict):
 
         memo_val = st.text_input("메모", value=e.get("memo", ""), key=f"edit_memo_{entry_id}")
 
-        c1, c2 = st.columns(2)
-        if c1.button("💾 저장", key=f"save_{entry_id}", use_container_width=True, type="primary"):
-            db.save_exercise_log(user["id"], e["date"], e["exercise_name"], new_sets, memo_val)
-            st.session_state[edit_key] = False
-            st.toast(f"{e['exercise_name']} 수정 완료!", icon="✅")
-            st.rerun()
-        if c2.button("취소", key=f"cancel_{entry_id}", use_container_width=True):
-            st.session_state[edit_key] = False
-            st.rerun()
+        with st.container(key=f"logeditbtns_{entry_id}"):
+            c1, c2 = st.columns(2)
+            if c1.button("💾 저장", key=f"save_{entry_id}", use_container_width=True, type="primary"):
+                db.save_exercise_log(user["id"], e["date"], e["exercise_name"], new_sets, memo_val)
+                st.session_state[edit_key] = False
+                st.toast(f"{e['exercise_name']} 수정 완료!", icon="✅")
+                st.rerun()
+            if c2.button("취소", key=f"cancel_{entry_id}", use_container_width=True):
+                st.session_state[edit_key] = False
+                st.rerun()
 
     st.markdown("---")
+
+
+def render_history_tab(user: dict):
+    """마이페이지의 '기록 히스토리' 탭 전체(날짜별 그룹 + 수정/삭제 버튼 CSS 포함).
+
+    app.py(내부 탭 방식)와 pages/1_mypage.py(실제 페이지 경로) 양쪽에서 똑같이 호출해서,
+    어느 경로로 들어오든 버튼 크기/줄바꿈이 항상 같게 맞춘다.
+    """
+    st.markdown(_LOG_HISTORY_CSS, unsafe_allow_html=True)
+
+    logs = db.get_all_logs(user["id"])
+    if not logs:
+        st.info("아직 기록이 없어요.")
+        return
+
+    by_date = {}
+    for d in logs:
+        by_date.setdefault(d["date"], []).append(d)
+
+    for date_str in sorted(by_date.keys(), reverse=True):
+        entries = by_date[date_str]
+        with st.expander(f"{date_str} · 운동 {len(entries)}개"):
+            for e in entries:
+                render_log_entry_editable(user, e)

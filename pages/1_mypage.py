@@ -26,16 +26,4 @@ with tab_pr:
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
 with tab_history:
-    logs = db.get_all_logs(user["id"])
-    if not logs:
-        st.info("아직 기록이 없어요.")
-    else:
-        by_date = {}
-        for d in logs:
-            by_date.setdefault(d["date"], []).append(d)
-
-        for date_str in sorted(by_date.keys(), reverse=True):
-            entries = by_date[date_str]
-            with st.expander(f"{date_str} · 운동 {len(entries)}개"):
-                for e in entries:
-                    ui.render_log_entry_editable(user, e)
+    ui.render_history_tab(user)
