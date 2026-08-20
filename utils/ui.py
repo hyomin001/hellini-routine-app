@@ -83,9 +83,35 @@ div[data-testid="stSelectbox"],
     box-sizing: border-box !important;
 }
 /* 만에 하나 안쪽에서 넘치는 요소가 있어도 화면 자체가
-   가로로 스크롤되지 않게 최종 안전장치 */
-html, body, .stApp, section.main, .main .block-container {
+   가로로 스크롤되지 않게 최종 안전장치.
+   (구버전 셀렉터 section.main/.main 뿐 아니라, 최신 Streamlit이 쓰는
+   data-testid 기반 셀렉터도 같이 걸어둬야 버전이 올라가도 계속 먹힌다) */
+html, body, .stApp,
+section.main, .main .block-container, .block-container,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+[data-testid="stBottomBlockContainer"] {
     overflow-x: hidden !important;
+    max-width: 100vw !important;
+}
+* {
+    box-sizing: border-box !important;
+}
+/* 사진(st.image)이 고정 px 폭(width=220 등)으로 지정돼 있어도,
+   화면이 그보다 좁아지면 이미지가 컬럼/화면 폭을 뚫고 나가지 않게 한다 */
+[data-testid="stImage"] img {
+    max-width: 100% !important;
+    height: auto !important;
+}
+/* 문의 내용 / 댓글 / 인증샷 한마디처럼 사용자가 자유롭게 입력한 텍스트는
+   공백 없이 긴 문자열(예: 링크, 이어붙인 영단어)이 들어오면 줄바꿈이
+   안 돼서 화면 폭을 뚫고 나갈 수 있다. 강제로 단어 중간에서도 줄바꿈되게 처리 */
+[data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] p,
+.stCaption, [data-testid="stCaptionContainer"] {
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
 }
 
 /* ===== 공용 규칙 1: st.container(key=f"evenrow_...") 로 감싼 줄은
@@ -109,6 +135,25 @@ div[class*="st-key-evenrow_"] .stButton > button {
     font-size: 12.5px !important;
     padding: 5px 4px !important;
     min-height: 36px !important;
+}
+/* 상단 네비게이션(오늘/기록/인증/랭킹/문의/관리/로그아웃)처럼 버튼이
+   5~7개까지 한 줄 그룹으로 몰릴 수 있는 곳은, 좁은 화면(480px 이하)에서
+   한 번 더 줄여서 절대 폭을 넘어가지 않게 여유를 둔다 */
+@media (max-width: 480px) {
+    div[class*="st-key-evenrow_"] div[data-testid="stHorizontalBlock"] {
+        gap: 5px !important;
+    }
+    div[class*="st-key-evenrow_"] .stButton > button {
+        font-size: 11.5px !important;
+        padding: 5px 2px !important;
+        min-height: 34px !important;
+    }
+}
+@media (max-width: 360px) {
+    div[class*="st-key-evenrow_"] .stButton > button {
+        font-size: 10.5px !important;
+        padding: 4px 1px !important;
+    }
 }
 
 /* ===== 공용 규칙 2: st.container(key=f"setrow_...") 로 감싼 줄은
