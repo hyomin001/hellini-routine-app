@@ -41,7 +41,11 @@ DAY_COLORS = {
 
 def render_rest_timer():
     """60/90/120초 휴식 타이머. 버튼 클릭도 이 위젯 안에서 순수 JS로 처리되므로
-    Streamlit 새로고침 없이 그 자리에서 바로 카운트다운된다 (원본 HTML의 타이머와 동일 동작)."""
+    Streamlit 새로고침 없이 그 자리에서 바로 카운트다운된다 (원본 HTML의 타이머와 동일 동작).
+
+    개선: 종료 시각(endTime)을 localStorage에 저장해두기 때문에, 다른 운동을 저장하는 등
+    화면이 다시 그려져서 이 위젯이 새로 로드되더라도(예전엔 여기서 타이머가 0으로 리셋됐음)
+    남은 시간을 그대로 이어서 보여준다. 페이지 전체에서 하나만 렌더링해서 쓰는 공용 위젯이다."""
     html = """
     <style>
       body{margin:0;padding:0;background:transparent;font-family:'Inter',sans-serif;}
@@ -83,53 +87,77 @@ def render_rest_timer():
       <div class="rt-msg" id="restMsg"></div>
     </div>
     <script>
-      const restTimer = {total:0, remaining:0, interval:null};
+      // endTime(목표 종료 시각)과 total(총 초)을 localStorage에 저장해서, 이 위젯이
+      // 새로고침(다른 운동 저장 등)으로 다시 그려져도 남은 시간을 이어서 보여준다.
+      const LS_END = 'hellini_rest_end';
+      const LS_TOTAL = 'hellini_rest_total';
+      const restTimer = {total:0, interval:null};
+
       document.querySelectorAll('[data-rest]').forEach(function(btn){
         btn.addEventListener('click', function(){ startRest(parseInt(btn.dataset.rest)); });
       });
+
       function startRest(seconds){
-        clearInterval(restTimer.interval);
+        const endTime = Date.now() + seconds*1000;
+        try{
+          localStorage.setItem(LS_END, String(endTime));
+          localStorage.setItem(LS_TOTAL, String(seconds));
+        }catch(e){}
         restTimer.total = seconds;
-        restTimer.remaining = seconds;
         document.getElementById('restBar').classList.add('show');
         document.getElementById('restMsg').textContent = '';
-        updateUI();
-        restTimer.interval = setInterval(function(){
-          restTimer.remaining--;
-          if(restTimer.remaining<=0){
-            clearInterval(restTimer.interval);
-            restTimer.remaining = 0;
-            updateUI();
-            onDone();
-            return;
-          }
-          updateUI();
-        }, 1000);
+        tick();
+        clearInterval(restTimer.interval);
+        restTimer.interval = setInterval(tick, 1000);
       }
-      function updateUI(){
-        const m = Math.floor(restTimer.remaining/60);
-        const s = restTimer.remaining%60;
+
+      function remainingSeconds(){
+        let end = 0;
+        try{ end = parseInt(localStorage.getItem(LS_END) || '0'); }catch(e){}
+        return Math.max(0, Math.round((end - Date.now())/1000));
+      }
+
+      function tick(){
+        const remaining = remainingSeconds();
+        updateUI(remaining);
+        if(remaining <= 0){
+          clearInterval(restTimer.interval);
+          onDone();
+        }
+      }
+
+      function updateUI(remaining){
+        const m = Math.floor(remaining/60);
+        const s = remaining%60;
         document.getElementById('restTime').textContent = m+':'+String(s).padStart(2,'0');
-        const pct = restTimer.total>0 ? Math.max(0, restTimer.remaining/restTimer.total*100) : 0;
+        const pct = restTimer.total>0 ? Math.max(0, remaining/restTimer.total*100) : 0;
         document.getElementById('restFill').style.width = pct+'%';
       }
+
       function stopRest(){
         clearInterval(restTimer.interval);
-        restTimer.remaining = 0;
+        try{ localStorage.removeItem(LS_END); localStorage.removeItem(LS_TOTAL); }catch(e){}
         document.getElementById('restBar').classList.remove('show');
       }
+
       function adjustRest(delta){
         if(restTimer.total<=0) return;
-        restTimer.remaining = Math.max(0, restTimer.remaining+delta);
-        if(restTimer.remaining > restTimer.total) restTimer.total = restTimer.remaining;
-        updateUI();
+        let end = 0;
+        try{ end = parseInt(localStorage.getItem(LS_END) || '0'); }catch(e){}
+        end += delta*1000;
+        const newRemaining = Math.max(0, Math.round((end - Date.now())/1000));
+        if(newRemaining > restTimer.total) restTimer.total = newRemaining;
+        try{ localStorage.setItem(LS_END, String(end)); localStorage.setItem(LS_TOTAL, String(restTimer.total)); }catch(e){}
+        updateUI(newRemaining);
       }
+
       function onDone(){
         document.getElementById('restMsg').textContent = '휴식 끝! 다음 세트 가보자 💪';
         if(navigator.vibrate) navigator.vibrate([200,100,200]);
         beep();
         setTimeout(stopRest, 2500);
       }
+
       function beep(){
         try{
           const ctx = new (window.AudioContext||window.webkitAudioContext)();
@@ -143,9 +171,23 @@ def render_rest_timer():
           o.start(); o.stop(ctx.currentTime+0.6);
         }catch(e){}
       }
+
       document.getElementById('restMinus').addEventListener('click', function(){ adjustRest(-15); });
       document.getElementById('restPlus').addEventListener('click', function(){ adjustRest(15); });
       document.getElementById('restStop').addEventListener('click', stopRest);
+
+      // 위젯이 (다시) 로드됐을 때, 진행 중이던 타이머가 있으면 그대로 이어서 표시
+      (function resumeIfActive(){
+        let total = 0;
+        try{ total = parseInt(localStorage.getItem(LS_TOTAL) || '0'); }catch(e){}
+        const remaining = remainingSeconds();
+        if(total > 0 && remaining > 0){
+          restTimer.total = total;
+          document.getElementById('restBar').classList.add('show');
+          updateUI(remaining);
+          restTimer.interval = setInterval(tick, 1000);
+        }
+      })();
     </script>
     """
     components.html(html, height=150, scrolling=False)
@@ -255,7 +297,7 @@ def render_auth():
     st.markdown("### 🏋️ 헬린이 루틴")
     st.caption("로그인하고 내 운동 기록을 저장해보세요.")
 
-    tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
+    tab_login, tab_signup, tab_forgot = st.tabs(["로그인", "회원가입", "비밀번호 찾기"])
 
     with tab_login:
         with st.form("login_form"):
@@ -281,16 +323,47 @@ def render_auth():
             new_nickname = st.text_input("닉네임 (랭킹에 표시돼요)", key="su_nickname")
             new_password = st.text_input("비밀번호", type="password", key="su_password")
             new_password2 = st.text_input("비밀번호 확인", type="password", key="su_password2")
+            st.markdown("**비밀번호를 잊었을 때 본인 확인용 질문이에요.**")
+            new_question = st.selectbox("보안 질문", db.SECURITY_QUESTIONS, key="su_question")
+            new_answer = st.text_input("답변", key="su_answer", placeholder="답변 (대소문자 구분 안 함)")
             submitted2 = st.form_submit_button("회원가입", use_container_width=True)
         if submitted2:
             if new_password != new_password2:
                 st.error("비밀번호가 서로 달라요.")
+            elif not new_answer.strip():
+                st.error("보안 질문 답변을 입력해주세요.")
             else:
-                ok, msg = db.create_user(new_username, new_password, new_nickname)
+                ok, msg = db.create_user(
+                    new_username, new_password, new_nickname, new_question, new_answer
+                )
                 if ok:
                     st.success(msg)
                 else:
                     st.error(msg)
+
+    with tab_forgot:
+        st.caption("아이디를 입력하면 가입할 때 설정한 보안 질문이 나와요.")
+        forgot_username = st.text_input("아이디", key="forgot_username")
+        question = db.get_security_question(forgot_username) if forgot_username.strip() else None
+
+        if forgot_username.strip() and not question:
+            st.info("보안 질문이 없거나 아직 등록하지 않은 계정이에요. 운영자에게 문의해주세요.")
+        elif question:
+            with st.form("forgot_form"):
+                st.markdown(f"**Q. {question}**")
+                answer = st.text_input("답변", key="forgot_answer")
+                new_pw = st.text_input("새 비밀번호", type="password", key="forgot_new_pw")
+                new_pw2 = st.text_input("새 비밀번호 확인", type="password", key="forgot_new_pw2")
+                submitted3 = st.form_submit_button("비밀번호 재설정", use_container_width=True)
+            if submitted3:
+                if new_pw != new_pw2:
+                    st.error("새 비밀번호가 서로 달라요.")
+                else:
+                    ok, msg = db.reset_password_with_security(forgot_username, answer, new_pw)
+                    if ok:
+                        st.success(msg)
+                    else:
+                        st.error(msg)
 
 
 # ================= 상단 네비게이션 (버튼식) =================
@@ -374,6 +447,18 @@ def render_today(user: dict):
         f"<span class='{overall_class}'>이 날짜 전체 {done_all}/{total_all} 완료</span></div>",
         unsafe_allow_html=True,
     )
+
+    st.caption("⏱ 세트 사이 휴식 타이머 (운동 하나 저장하고 다시 열어도 이어서 흘러가요)")
+    render_rest_timer()
+
+    with st.expander(f"🔥 {date_str} 인증 현황 (누가 오늘 운동했나 보기)"):
+        checkins = db.get_today_checkins(date_str, len(ALL_EXERCISE_NAMES))
+        if not checkins:
+            st.caption("아직 이 날짜에 기록을 남긴 사람이 없어요. 첫 인증을 남겨보세요!")
+        else:
+            for c in checkins:
+                mine = " 👈 나" if c["nickname"] == user["nickname"] else ""
+                st.markdown(f"💪 **{c['nickname']}**{mine} · {c['done_count']}종목 기록")
 
     day_labels = [f"{d['label']} · {d['part']}" for d in DAYS]
     tab_objs = st.tabs(day_labels)
@@ -470,8 +555,6 @@ def render_today(user: dict):
                             )
                         new_sets.append({"w": w_val, "r": r_val})
 
-                    render_rest_timer()
-
                     memo_val = st.text_input(
                         "메모", value=memo_state, key=f"{base_key}_memo",
                         placeholder="컨디션, 폼 체크 등 메모",
@@ -498,7 +581,11 @@ def render_mypage(user: dict):
     c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
     c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
 
-    tab_pr, tab_history, tab_settings = st.tabs(["🏅 개인 최고기록", "🗓️ 기록 히스토리", "⚙️ 계정 설정"])
+    ui.render_streak_heatmap(db.get_workout_dates(user["id"]))
+
+    tab_pr, tab_badges, tab_history, tab_settings = st.tabs(
+        ["🏅 개인 최고기록", "🎖️ 뱃지", "🗓️ 기록 히스토리", "⚙️ 계정 설정"]
+    )
 
     with tab_pr:
         pr_map = db.get_personal_records(user["id"])
@@ -510,6 +597,23 @@ def render_mypage(user: dict):
                 for name, rec in sorted(pr_map.items(), key=lambda kv: -kv[1]["weight"])
             ]
             st.dataframe(rows, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.markdown("**📈 운동별 무게 추이**")
+            chart_ex = st.selectbox("운동 선택", sorted(pr_map.keys()), key="progress_chart_ex")
+            history = db.get_weight_history(user["id"], chart_ex)
+            if len(history) < 2:
+                st.caption("기록이 2개 이상 쌓이면 추이 그래프가 나타나요.")
+            else:
+                chart_data = {h["date"]: h["weight"] for h in history}
+                st.line_chart(chart_data)
+
+    with tab_badges:
+        st.caption("꾸준함과 기록이 쌓이면 뱃지가 하나씩 열려요.")
+        badges = db.get_badges(user["id"], user["nickname"], today_kst().isoformat(), len(ALL_EXERCISE_NAMES))
+        earned = sum(1 for b in badges if b["achieved"])
+        st.markdown(f"**{earned} / {len(badges)}개 달성**")
+        ui.render_badges(badges)
 
     with tab_history:
         ui.render_history_tab(user)
@@ -560,6 +664,13 @@ def render_ranking(user: dict):
         if not rows:
             st.info("아직 이 운동에 대한 기록이 없어요. 가장 먼저 기록을 남겨보세요!")
         else:
+            my_rank = db.get_my_exercise_rank(exercise, user["id"])
+            if my_rank is None:
+                st.caption("아직 이 운동 기록이 없어요.")
+            elif my_rank > 20:
+                st.caption(f"📍 내 순위: {my_rank}위 (TOP 20 밖)")
+            else:
+                st.caption(f"📍 내 순위: {my_rank}위")
             table = []
             for i, r in enumerate(rows, start=1):
                 medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}")
@@ -581,6 +692,11 @@ def render_ranking(user: dict):
         if not rows:
             st.info("아직 기록이 없어요.")
         else:
+            my_vol_rank = db.get_my_volume_rank(user["id"])
+            if my_vol_rank and my_vol_rank > 20:
+                st.caption(f"📍 내 순위: {my_vol_rank}위 (TOP 20 밖)")
+            elif my_vol_rank:
+                st.caption(f"📍 내 순위: {my_vol_rank}위")
             table = []
             for i, r in enumerate(rows, start=1):
                 medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}")
@@ -680,6 +796,11 @@ def render_admin(user: dict):
         else:
             st.info("아직 기록이 없어요.")
 
+        st.divider()
+        st.markdown("**📈 최근 14일 가입 추이**")
+        signup_rows = db.get_signup_counts_by_day(14)
+        st.bar_chart({r["날짜"]: r["가입자 수"] for r in signup_rows})
+
     with tab_users:
         users = db.list_all_users()
         st.caption(f"총 {len(users)}명")
@@ -713,6 +834,19 @@ def render_admin(user: dict):
                             if st.button("삭제", key=f"del_{u['_id']}"):
                                 st.session_state[confirm_key] = True
                                 st.rerun()
+
+                if u["username"] != user["username"]:
+                    reset_key = f"reset_pw_result_{u['_id']}"
+                    if st.session_state.get(reset_key):
+                        st.success(f"임시 비밀번호: `{st.session_state[reset_key]}` (본인에게 꼭 전달해주세요)")
+                        if st.button("확인함", key=f"ack_{u['_id']}"):
+                            st.session_state.pop(reset_key, None)
+                            st.rerun()
+                    else:
+                        if st.button("🔑 비밀번호 강제 초기화", key=f"resetpw_{u['_id']}"):
+                            temp_pw = db.admin_reset_password(str(u["_id"]))
+                            st.session_state[reset_key] = temp_pw
+                            st.rerun()
 
     with tab_inquiries:
         inquiries = db.get_inquiries(limit=500)

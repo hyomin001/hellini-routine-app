@@ -15,6 +15,10 @@ app.py는 pages/ 폴더 없이 단일 스크립트 + st.session_state 라우팅 
 "N세트 · 무게 · 횟수"처럼 첫 칸은 좁고 나머지 두 칸은 입력창인 줄은
 st.container(key=f"setrow_...")로 감싸면 동일하게 자동 처리된다.
 """
+import csv
+import datetime as _dt
+import io
+
 import streamlit as st
 
 from utils import db
@@ -169,6 +173,34 @@ def render_account_settings(user: dict):
                 st.error(msg)
 
     st.markdown("---")
+    st.markdown("**🔑 비밀번호 찾기 설정**")
+    st.caption("비밀번호를 잊었을 때 본인 확인에 쓸 질문/답변이에요. 아직 안 정해뒀다면 꼭 설정해두세요.")
+    with st.form("security_q_form"):
+        q = st.selectbox("보안 질문", db.SECURITY_QUESTIONS, key="sec_q_select")
+        a = st.text_input("답변", key="sec_q_answer", placeholder="답변 (대소문자 구분 안 함)")
+        submitted3 = st.form_submit_button("보안 질문 저장", use_container_width=True)
+    if submitted3:
+        ok, msg = db.set_security_question(user["id"], q, a)
+        if ok:
+            st.success(msg)
+        else:
+            st.error(msg)
+
+    st.markdown("---")
+    st.markdown("**⬇️ 내 기록 CSV 다운로드**")
+    logs = db.get_all_logs(user["id"])
+    if logs:
+        st.download_button(
+            "내 운동 기록 CSV 받기",
+            data=build_logs_csv(logs),
+            file_name=f"헬린이루틴_{user['nickname']}_기록.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    else:
+        st.caption("아직 다운로드할 기록이 없어요.")
+
+    st.markdown("---")
     st.markdown("**🚪 회원 탈퇴**")
     st.caption("탈퇴하면 내 운동 기록이 모두 삭제되고 되돌릴 수 없어요.")
     pw_for_delete = st.text_input("비밀번호 확인", type="password", key="del_acc_pw", placeholder="비밀번호 확인")
@@ -261,6 +293,94 @@ def render_log_entry_editable(user: dict, e: dict):
                 st.rerun()
 
     st.markdown("---")
+
+
+def build_logs_csv(logs: list) -> str:
+    """기록 리스트를 CSV 문자열로 변환 (엑셀에서 바로 열리도록 UTF-8 BOM 포함)."""
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf)
+    writer.writerow(["날짜", "운동", "세트", "무게(kg)", "횟수", "메모"])
+    for d in logs:
+        valid = [s for s in d["sets"] if s.get("w") not in (None, "") and s.get("r") not in (None, "")]
+        if not valid:
+            writer.writerow([d["date"], d["exercise_name"], "", "", "", d.get("memo", "")])
+            continue
+        for i, s in enumerate(valid, start=1):
+            writer.writerow([d["date"], d["exercise_name"], i, s.get("w", ""), s.get("r", ""), d.get("memo", "") if i == 1 else ""])
+    return buf.getvalue()
+
+
+def render_streak_heatmap(workout_dates: set, weeks: int = 14):
+    """최근 N주간의 기록 유무를 GitHub 잔디밭 스타일 그리드로 보여준다."""
+    today = _dt.date.today()
+    # 이번 주 일요일을 오른쪽 끝으로 맞추기 위해, 오늘 기준 요일(0=월)만큼 보정
+    end = today
+    start = end - _dt.timedelta(days=weeks * 7 - 1)
+    # start를 그 주의 월요일로 당김
+    start -= _dt.timedelta(days=start.weekday())
+
+    cells = []
+    cur = start
+    while cur <= end:
+        cells.append(cur)
+        cur += _dt.timedelta(days=1)
+
+    cols_html = []
+    col = []
+    for d in cells:
+        col.append(d)
+        if d.weekday() == 6:  # 일요일마다 한 컬럼 마감
+            cols_html.append(col)
+            col = []
+    if col:
+        cols_html.append(col)
+
+    day_labels = ["월", "", "수", "", "금", "", "일"]
+    grid = "<div style='display:flex; gap:3px; overflow-x:auto; padding:4px 0;'>"
+    grid += "<div style='display:flex; flex-direction:column; gap:3px; margin-right:4px;'>"
+    for lbl in day_labels:
+        grid += f"<div style='width:14px; height:12px; font-size:9px; color:#6B6F78;'>{lbl}</div>"
+    grid += "</div>"
+    for week in cols_html:
+        grid += "<div style='display:flex; flex-direction:column; gap:3px;'>"
+        for d in week:
+            in_range = start <= d <= end
+            active = d.isoformat() in workout_dates
+            if not in_range:
+                color = "transparent"
+            elif active:
+                color = "#4ECDC4"
+            else:
+                color = "#23262C"
+            grid += (
+                f"<div title='{d.isoformat()}' "
+                f"style='width:12px; height:12px; border-radius:3px; background:{color};'></div>"
+            )
+        grid += "</div>"
+    grid += "</div>"
+    st.markdown(grid, unsafe_allow_html=True)
+    st.caption("최근 몇 달간의 운동 기록이에요. 진한 칸일수록 그날 기록을 남긴 거예요 🟩")
+
+
+def render_badges(badges: list):
+    """뱃지 목록을 카드 그리드로 렌더링 (달성 여부에 따라 색 다르게)."""
+    cols = st.columns(3)
+    for i, b in enumerate(badges):
+        with cols[i % 3]:
+            if b["achieved"]:
+                bg, border, opacity = "#1E241E", "#4ECDC4", "1"
+            else:
+                bg, border, opacity = "#1B1D22", "#33373F", "0.45"
+            st.markdown(
+                f"<div style='background:{bg}; border:1px solid {border}; border-radius:12px; "
+                f"padding:10px 8px; text-align:center; margin-bottom:8px; opacity:{opacity};'>"
+                f"<div style='font-size:22px;'>{b['icon']}</div>"
+                f"<div style='font-size:12.5px; font-weight:700; color:#F2F1EC; margin-top:2px;'>{b['name']}</div>"
+                f"<div style='font-size:10.5px; color:#9296A0;'>{b['need']}</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
 
 
 def render_history_tab(user: dict):

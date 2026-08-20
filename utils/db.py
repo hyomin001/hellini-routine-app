@@ -3,6 +3,8 @@
 MongoDB 데이터 계층.
 연결 정보는 st.secrets["MONGO_URI"] 에서 읽는다 (.streamlit/secrets.toml 참고).
 """
+import secrets as _secrets
+import string as _string
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -11,6 +13,14 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 from bson import ObjectId
 
 from utils.auth import hash_password, verify_password
+
+# 비밀번호 찾기용 보안 질문 목록 (회원가입 시 하나 선택)
+SECURITY_QUESTIONS = [
+    "어릴 적 별명은?",
+    "가장 좋아하는 음식은?",
+    "첫 반려동물(또는 갖고 싶은 동물) 이름은?",
+    "태어난 도시는?",
+]
 
 # 몇 분 동안 활동(하트비트)이 없으면 '접속 종료'로 볼지
 ACTIVE_WINDOW_MINUTES = 5
@@ -51,7 +61,13 @@ def nickname_exists(nickname: str) -> bool:
     return get_db().users.find_one({"nickname": nickname}) is not None
 
 
-def create_user(username: str, password: str, nickname: str):
+def create_user(
+    username: str,
+    password: str,
+    nickname: str,
+    security_question: Optional[str] = None,
+    security_answer: Optional[str] = None,
+):
     username = username.strip()
     nickname = nickname.strip()
     if not username or not password or not nickname:
@@ -63,15 +79,19 @@ def create_user(username: str, password: str, nickname: str):
     if nickname_exists(nickname):
         return False, "이미 사용 중인 닉네임이에요."
     salt, pw_hash = hash_password(password)
-    get_db().users.insert_one(
-        {
-            "username": username,
-            "salt": salt,
-            "pw_hash": pw_hash,
-            "nickname": nickname,
-            "created_at": datetime.utcnow(),
-        }
-    )
+    doc = {
+        "username": username,
+        "salt": salt,
+        "pw_hash": pw_hash,
+        "nickname": nickname,
+        "created_at": datetime.utcnow(),
+    }
+    if security_question and security_answer and security_answer.strip():
+        ans_salt, ans_hash = hash_password(security_answer.strip().lower())
+        doc["security_question"] = security_question
+        doc["security_answer_salt"] = ans_salt
+        doc["security_answer_hash"] = ans_hash
+    get_db().users.insert_one(doc)
     return True, "회원가입 완료! 이제 로그인해주세요."
 
 
@@ -105,6 +125,43 @@ def delete_user(user_id: str):
     db.users.delete_one({"_id": ObjectId(user_id)})
     db.logs.delete_many({"user_id": user_id})
     db.presence.delete_one({"user_id": user_id})
+
+
+# ================= 비밀번호 찾기 (보안 질문) =================
+
+def get_security_question(username: str) -> Optional[str]:
+    """해당 아이디에 등록된 보안 질문을 반환. 아이디가 없거나 질문이 없으면 None."""
+    user = get_db().users.find_one({"username": username.strip()})
+    if not user:
+        return None
+    return user.get("security_question")
+
+
+def reset_password_with_security(username: str, answer: str, new_password: str):
+    user = get_db().users.find_one({"username": username.strip()})
+    if not user or not user.get("security_answer_hash"):
+        return False, "본인 확인 정보가 없는 계정이에요. 운영자에게 문의해주세요."
+    if len(new_password) < 4:
+        return False, "새 비밀번호는 4자 이상이어야 해요."
+    ok = verify_password(
+        (answer or "").strip().lower(),
+        user["security_answer_salt"],
+        user["security_answer_hash"],
+    )
+    if not ok:
+        return False, "답변이 일치하지 않아요."
+    salt, pw_hash = hash_password(new_password)
+    get_db().users.update_one({"_id": user["_id"]}, {"$set": {"salt": salt, "pw_hash": pw_hash}})
+    return True, "비밀번호를 재설정했어요. 새 비밀번호로 로그인해주세요."
+
+
+def admin_reset_password(user_id: str) -> str:
+    """관리자가 회원의 비밀번호를 임시 비밀번호로 강제 초기화하고, 그 임시 비밀번호를 반환한다."""
+    alphabet = _string.ascii_letters + _string.digits
+    temp_password = "".join(_secrets.choice(alphabet) for _ in range(8))
+    salt, pw_hash = hash_password(temp_password)
+    get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": {"salt": salt, "pw_hash": pw_hash}})
+    return temp_password
 
 
 # ================= 관리자 =================
@@ -247,6 +304,23 @@ def get_leaderboard(exercise_name: str, limit: int = 20) -> list:
     return rows[:limit]
 
 
+def get_my_exercise_rank(exercise_name: str, user_id: str) -> Optional[int]:
+    """TOP20 제한 없이 전체 순위에서 내 등수를 찾는다 (1부터 시작). 기록 없으면 None."""
+    rows = get_leaderboard(exercise_name, limit=100000)
+    for i, r in enumerate(rows, start=1):
+        if r.get("user_id") == user_id:
+            return i
+    return None
+
+
+def get_my_volume_rank(user_id: str) -> Optional[int]:
+    rows = get_volume_leaderboard(limit=100000)
+    for i, r in enumerate(rows, start=1):
+        if r.get("user_id") == user_id:
+            return i
+    return None
+
+
 def get_champions(exercise_names: list) -> dict:
     """운동명 -> 그 운동 1위(최고 무게, 동률이면 최고 횟수) 기록. 기록 없는 운동은 제외."""
     result = {}
@@ -343,6 +417,23 @@ def change_password(user_id: str, current_password: str, new_password: str):
     return True, "비밀번호를 변경했어요."
 
 
+def set_security_question(user_id: str, question: str, answer: str):
+    if not question or not answer or not answer.strip():
+        return False, "질문과 답변을 모두 입력해주세요."
+    ans_salt, ans_hash = hash_password(answer.strip().lower())
+    get_db().users.update_one(
+        {"_id": ObjectId(user_id)},
+        {
+            "$set": {
+                "security_question": question,
+                "security_answer_salt": ans_salt,
+                "security_answer_hash": ans_hash,
+            }
+        },
+    )
+    return True, "비밀번호 찾기용 보안 질문을 설정했어요."
+
+
 def delete_own_account(user_id: str, password: str):
     user = get_user_by_id(user_id)
     if not user or not verify_password(password, user["salt"], user["pw_hash"]):
@@ -432,3 +523,132 @@ def get_dashboard_stats() -> dict:
         "total_inquiries": db.inquiries.count_documents({}),
         "open_inquiries": db.inquiries.count_documents({"status": {"$ne": "완료"}}),
     }
+
+
+def get_signup_counts_by_day(days: int = 14) -> list:
+    """최근 N일간 일별 가입자 수. 관리자 대시보드 추이 차트용."""
+    database = get_db()
+    since = datetime.utcnow() - timedelta(days=days - 1)
+    counts = {}
+    for u in database.users.find({"created_at": {"$gte": since}}, {"created_at": 1}):
+        day = u["created_at"].strftime("%m-%d")
+        counts[day] = counts.get(day, 0) + 1
+    ordered = []
+    for i in range(days - 1, -1, -1):
+        day = (datetime.utcnow() - timedelta(days=i)).strftime("%m-%d")
+        ordered.append({"날짜": day, "가입자 수": counts.get(day, 0)})
+    return ordered
+
+
+# ================= 오늘 인증 현황 (커뮤니티 동기부여) =================
+
+def get_today_checkins(date_str: str, total_exercise_count: int) -> list:
+    """오늘 하나라도 기록을 남긴 사람들을, 완료한 종목 수 기준 내림차순으로 반환.
+    [{nickname, done_count, total, updated_at}]"""
+    database = get_db()
+    docs = list(database.logs.find({"date": date_str}, {"user_id": 1, "updated_at": 1}))
+    if not docs:
+        return []
+    per_user = {}
+    for d in docs:
+        uid = d["user_id"]
+        cur = per_user.setdefault(uid, {"count": 0, "updated_at": d.get("updated_at")})
+        cur["count"] += 1
+        if d.get("updated_at") and (not cur["updated_at"] or d["updated_at"] > cur["updated_at"]):
+            cur["updated_at"] = d["updated_at"]
+
+    user_ids = []
+    for uid in per_user:
+        try:
+            user_ids.append(ObjectId(uid))
+        except Exception:
+            pass
+    users = {str(u["_id"]): u["nickname"] for u in database.users.find({"_id": {"$in": user_ids}})}
+
+    rows = [
+        {
+            "nickname": users.get(uid, "알수없음"),
+            "done_count": v["count"],
+            "total": total_exercise_count,
+            "updated_at": v["updated_at"],
+        }
+        for uid, v in per_user.items()
+    ]
+    rows.sort(key=lambda r: (-r["done_count"], r["updated_at"] or datetime.min))
+    return rows
+
+
+# ================= 운동별 무게 추이 (진행 그래프) =================
+
+def get_weight_history(user_id: str, exercise_name: str) -> list:
+    """해당 운동의 날짜별 최고 무게 기록을 날짜 오름차순으로 반환. [{date, weight, reps}]"""
+    docs = list(
+        get_db()
+        .logs.find({"user_id": user_id, "exercise_name": exercise_name})
+        .sort("date", ASCENDING)
+    )
+    rows = []
+    for d in docs:
+        best = _best_from_sets(d["sets"])
+        if best is None:
+            continue
+        w, r = best
+        rows.append({"date": d["date"], "weight": w, "reps": r})
+    return rows
+
+
+# ================= 스트릭 히트맵용 기록일 집합 =================
+
+def get_workout_dates(user_id: str) -> set:
+    """기록이 있는 날짜 문자열(YYYY-MM-DD) 집합."""
+    return {d["date"] for d in get_db().logs.find({"user_id": user_id}, {"date": 1})}
+
+
+# ================= 뱃지 / 업적 =================
+
+BADGE_DEFS = [
+    {"id": "streak3", "icon": "🔥", "name": "3일 연속", "need": "연속 기록 3일"},
+    {"id": "streak7", "icon": "🔥", "name": "7일 연속", "need": "연속 기록 7일"},
+    {"id": "streak30", "icon": "🔥", "name": "30일 연속", "need": "연속 기록 30일"},
+    {"id": "days10", "icon": "🗓️", "name": "총 10일", "need": "누적 기록 10일"},
+    {"id": "days50", "icon": "🗓️", "name": "총 50일", "need": "누적 기록 50일"},
+    {"id": "days100", "icon": "🗓️", "name": "총 100일", "need": "누적 기록 100일"},
+    {"id": "vol1000", "icon": "🏋️", "name": "볼륨 1,000kg", "need": "총 볼륨 1,000kg"},
+    {"id": "vol5000", "icon": "🏋️", "name": "볼륨 5,000kg", "need": "총 볼륨 5,000kg"},
+    {"id": "vol10000", "icon": "🏋️", "name": "볼륨 10,000kg", "need": "총 볼륨 10,000kg"},
+    {"id": "champion", "icon": "👑", "name": "챔피언", "need": "한 종목 이상 1위"},
+    {"id": "allrounder", "icon": "🎯", "name": "올라운더", "need": "모든 종목 1회 이상 기록"},
+]
+
+
+def get_champion_count(user_id: str, nickname: str) -> int:
+    """이 유저가 1위(챔피언)인 종목 수. 본인이 PR을 가진 종목만 확인해서 조회량을 줄인다."""
+    pr_map = get_personal_records(user_id)
+    count = 0
+    for name in pr_map:
+        top = get_leaderboard(name, limit=1)
+        if top and top[0]["nickname"] == nickname:
+            count += 1
+    return count
+
+
+def get_badges(user_id: str, nickname: str, today_str: str, all_exercise_count: int) -> list:
+    """[{icon, name, need, achieved}] BADGE_DEFS 순서대로."""
+    stats = get_user_stats(user_id, today_str)
+    pr_map = get_personal_records(user_id)
+    champ_count = get_champion_count(user_id, nickname)
+
+    achieved = {
+        "streak3": stats["streak"] >= 3,
+        "streak7": stats["streak"] >= 7,
+        "streak30": stats["streak"] >= 30,
+        "days10": stats["workout_days"] >= 10,
+        "days50": stats["workout_days"] >= 50,
+        "days100": stats["workout_days"] >= 100,
+        "vol1000": stats["total_volume"] >= 1000,
+        "vol5000": stats["total_volume"] >= 5000,
+        "vol10000": stats["total_volume"] >= 10000,
+        "champion": champ_count >= 1,
+        "allrounder": len(pr_map) >= all_exercise_count,
+    }
+    return [dict(b, achieved=achieved.get(b["id"], False)) for b in BADGE_DEFS]
