@@ -5,7 +5,10 @@
     "salt": "f63a2144241b6010922e8d2e0907c571",
     "pw_hash": "3186a6bf9bf2d9b1ccae590f1f6191155eaeab43867275d0278bd14d5d950b04",
     "nickname": "김효민",
-    "created_at": "2026-08-19T05:02:48.193000"
+    "created_at": "2026-08-19T05:02:48.193000",
+    "security_answer_hash": "f53d6ca854a9537a6f1128bcbe85436a957be3a0bb6b56b99c5c9499377cabba",
+    "security_answer_salt": "9df8b2647bf84cfc60e88c9925678ec7",
+    "security_question": "가장 좋아하는 음식은?"
   },
   {
     "_id": "6a85464702a83ee58d08504a",
@@ -22,5 +25,40 @@
     "pw_hash": "623e753f91111b0d4d34dbe73b858ad10cc5bb574b7ca9bf660cef0344ea95fb",
     "nickname": "율공듀",
     "created_at": "2026-08-19T06:18:30.384000"
+  },
+  {
+    "_id": "6a86256108a154980d73dbb1",
+    "username": "헬스",
+    "salt": "2083fede3019916ec882a6b85ee3e6c0",
+    "pw_hash": "30b47b14a7b8d85cfdac40439ddae6f85f7564ef0c8caf18e60cd5ab41188478",
+    "nickname": "헬스",
+    "created_at": "2026-08-19T21:51:29.541000"
+  },
+  {
+    "_id": "6a86258508a154980d73dbb2",
+    "username": "3922",
+    "salt": "1bf0da3d4e3d145e12172f70a3211ab4",
+    "pw_hash": "54172e693b8d5f53df7d061a798169bb1207db5b02b034fdf291d036e2d4da78",
+    "nickname": "3922",
+    "created_at": "2026-08-19T21:52:05.258000"
+  },
+  {
+    "_id": "6a86259b08a154980d73dbb3",
+    "username": "qwer",
+    "salt": "2ce75de8f402336c4c66df5fb12d09a5",
+    "pw_hash": "ae86c8d53431485a01fd156453c1f2f38e9582593670a3e14757b73e81834fad",
+    "nickname": "헬린",
+    "created_at": "2026-08-19T21:52:27.736000"
+  },
+  {
+    "_id": "6a86f9127c279cdeb6ef0463",
+    "username": "wowchoi",
+    "salt": "2d838d7cce8599ade11d065558b56de9",
+    "pw_hash": "61730f9e59e898c438f13c358d164d43ec74511da40095966fb2ff4d29f926b5",
+    "nickname": "초이",
+    "created_at": "2026-08-20T12:54:42.741000",
+    "security_question": "태어난 도시는?",
+    "security_answer_salt": "17c38d17dd2f4c7f10746f7f79e1972d",
+    "security_answer_hash": "0e72fb34b5158e828a0a1b59e4ff3ec9656c82830ceb3d372b810263137dcd85"
   }
 ]
