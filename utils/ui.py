@@ -15,6 +15,7 @@ app.py는 pages/ 폴더 없이 단일 스크립트 + st.session_state 라우팅 
 "N세트 · 무게 · 횟수"처럼 첫 칸은 좁고 나머지 두 칸은 입력창인 줄은
 st.container(key=f"setrow_...")로 감싸면 동일하게 자동 처리된다.
 """
+import calendar as _calendar
 import csv
 import datetime as _dt
 import io
@@ -369,56 +370,55 @@ def build_logs_csv(logs: list) -> str:
     return buf.getvalue()
 
 
-def render_streak_heatmap(workout_dates: set, weeks: int = 14):
-    """최근 N주간의 기록 유무를 GitHub 잔디밭 스타일 그리드로 보여준다."""
+def render_streak_heatmap(workout_dates: set):
+    """운동 기록을 진짜 달력(이번 달)처럼 보여준다. 기록 남긴 날은 민트색으로 색칠,
+    오늘 날짜엔 노란 테두리를 둘러서 한눈에 봐도 '몇일에 뭐 했는지'가 바로 보이게 한다.
+    (예전 깃허브 잔디밭 스타일 그리드는 모바일 좁은 화면에서 옆으로 스크롤해야만
+    최근 며칠이 보이는 구조라 뭘 나타내는지 애매했음 → 스크롤 없이 한 화면에 다 보이는
+    7칸(월~일) 달력으로 교체)"""
     today = _dt.date.today()
-    # 이번 주 일요일을 오른쪽 끝으로 맞추기 위해, 오늘 기준 요일(0=월)만큼 보정
-    end = today
-    start = end - _dt.timedelta(days=weeks * 7 - 1)
-    # start를 그 주의 월요일로 당김
-    start -= _dt.timedelta(days=start.weekday())
+    year, month = today.year, today.month
+    cal = _calendar.Calendar(firstweekday=0)  # 월요일 시작
+    weeks = cal.monthdatescalendar(year, month)
 
-    cells = []
-    cur = start
-    while cur <= end:
-        cells.append(cur)
-        cur += _dt.timedelta(days=1)
-
-    cols_html = []
-    col = []
-    for d in cells:
-        col.append(d)
-        if d.weekday() == 6:  # 일요일마다 한 컬럼 마감
-            cols_html.append(col)
-            col = []
-    if col:
-        cols_html.append(col)
-
-    day_labels = ["월", "", "수", "", "금", "", "일"]
-    grid = "<div style='display:flex; gap:3px; overflow-x:auto; padding:4px 0;'>"
-    grid += "<div style='display:flex; flex-direction:column; gap:3px; margin-right:4px;'>"
+    day_labels = ["월", "화", "수", "목", "금", "토", "일"]
+    grid = (
+        "<div style='display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); "
+        "gap:4px; margin-bottom:4px;'>"
+    )
     for lbl in day_labels:
-        grid += f"<div style='width:14px; height:12px; font-size:9px; color:#6B6F78;'>{lbl}</div>"
+        grid += (
+            f"<div style='text-align:center; font-size:10.5px; color:#6B6F78; "
+            f"font-weight:600;'>{lbl}</div>"
+        )
     grid += "</div>"
-    for week in cols_html:
-        grid += "<div style='display:flex; flex-direction:column; gap:3px;'>"
+
+    for week in weeks:
+        grid += (
+            "<div style='display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); "
+            "gap:4px; margin-bottom:4px;'>"
+        )
         for d in week:
-            in_range = start <= d <= end
+            in_month = d.month == month
             active = d.isoformat() in workout_dates
-            if not in_range:
-                color = "transparent"
+            is_today = d == today
+            if not in_month:
+                bg, txt_color, opacity = "transparent", "#4B4F58", "0.4"
             elif active:
-                color = "#4ECDC4"
+                bg, txt_color, opacity = "#4ECDC4", "#101214", "1"
             else:
-                color = "#23262C"
+                bg, txt_color, opacity = "#23262C", "#9296A0", "1"
+            border = "box-shadow:inset 0 0 0 1.5px #FFC834;" if (is_today and in_month) else ""
             grid += (
-                f"<div title='{d.isoformat()}' "
-                f"style='width:12px; height:12px; border-radius:3px; background:{color};'></div>"
+                f"<div title='{d.isoformat()}' style='aspect-ratio:1; display:flex; "
+                f"align-items:center; justify-content:center; border-radius:7px; "
+                f"background:{bg}; color:{txt_color}; opacity:{opacity}; {border} "
+                f"font-size:11.5px; font-weight:600;'>{d.day}</div>"
             )
         grid += "</div>"
-    grid += "</div>"
+
     st.markdown(grid, unsafe_allow_html=True)
-    st.caption("최근 몇 달간의 운동 기록이에요. 진한 칸일수록 그날 기록을 남긴 거예요 🟩")
+    st.caption(f"📅 {month}월 운동 달력이에요. 민트색 칸이 그날 기록을 남긴 날, 노란 테두리는 오늘이에요.")
 
 
 def render_badges(badges: list):
