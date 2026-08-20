@@ -288,6 +288,139 @@ def delete_inquiry(inquiry_id):
     get_db().inquiries.delete_one({"_id": ObjectId(inquiry_id)})
 
 
+def answer_inquiry(inquiry_id, answer: str):
+    """관리자가 문의에 남긴 답변을 저장 (공개 게시판에 함께 노출됨)."""
+    get_db().inquiries.update_one(
+        {"_id": ObjectId(inquiry_id)},
+        {"$set": {"answer": answer.strip(), "answered_at": datetime.utcnow()}},
+    )
+
+
+# ================= 세트 값 검증 =================
+
+def validate_sets(sets: list):
+    """무게/횟수가 숫자 형태인지 확인. 하나만 채워진 경우, 숫자가 아닌 경우, 음수인 경우를 걸러낸다."""
+    for i, s in enumerate(sets, start=1):
+        w, r = s.get("w", ""), s.get("r", "")
+        w_filled = w not in (None, "")
+        r_filled = r not in (None, "")
+        if not w_filled and not r_filled:
+            continue
+        if w_filled != r_filled:
+            return False, f"{i}세트: 무게와 횟수를 둘 다 입력해주세요."
+        try:
+            wf = float(w)
+            ri = int(r)
+        except (TypeError, ValueError):
+            return False, f"{i}세트: 무게/횟수는 숫자로 입력해주세요."
+        if wf < 0 or ri < 0:
+            return False, f"{i}세트: 무게/횟수는 0 이상이어야 해요."
+    return True, ""
+
+
+# ================= 계정 설정 (닉네임/비밀번호 변경, 탈퇴) =================
+
+def change_nickname(user_id: str, new_nickname: str):
+    new_nickname = new_nickname.strip()
+    if not new_nickname:
+        return False, "닉네임을 입력해주세요."
+    database = get_db()
+    other = database.users.find_one({"nickname": new_nickname})
+    if other and str(other["_id"]) != user_id:
+        return False, "이미 사용 중인 닉네임이에요."
+    database.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"nickname": new_nickname}})
+    return True, "닉네임을 변경했어요."
+
+
+def change_password(user_id: str, current_password: str, new_password: str):
+    if len(new_password) < 4:
+        return False, "새 비밀번호는 4자 이상이어야 해요."
+    user = get_user_by_id(user_id)
+    if not user or not verify_password(current_password, user["salt"], user["pw_hash"]):
+        return False, "현재 비밀번호가 일치하지 않아요."
+    salt, pw_hash = hash_password(new_password)
+    get_db().users.update_one({"_id": ObjectId(user_id)}, {"$set": {"salt": salt, "pw_hash": pw_hash}})
+    return True, "비밀번호를 변경했어요."
+
+
+def delete_own_account(user_id: str, password: str):
+    user = get_user_by_id(user_id)
+    if not user or not verify_password(password, user["salt"], user["pw_hash"]):
+        return False, "비밀번호가 일치하지 않아요."
+    delete_user(user_id)
+    return True, "계정을 삭제했어요. 그동안 함께해줘서 고마워요!"
+
+
+# ================= 개인 통계 (볼륨/스트릭) =================
+
+def get_user_stats(user_id: str, today_str: str) -> dict:
+    """총 볼륨(무게×횟수 합), 총 기록일 수, 오늘 기준 연속 기록일(스트릭)."""
+    logs = get_all_logs(user_id)
+    total_volume = 0.0
+    dates = set()
+    for d in logs:
+        dates.add(d["date"])
+        for s in d["sets"]:
+            try:
+                w = float(s["w"])
+                r = int(s["r"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            total_volume += w * r
+
+    streak = 0
+    if dates:
+        from datetime import date as _date, timedelta as _td
+
+        cur = _date.fromisoformat(today_str)
+        if today_str not in dates:
+            cur -= _td(days=1)
+        while cur.isoformat() in dates:
+            streak += 1
+            cur -= _td(days=1)
+
+    return {"total_volume": total_volume, "workout_days": len(dates), "streak": streak}
+
+
+# ================= 총 볼륨 랭킹 =================
+
+def get_volume_leaderboard(limit: int = 20) -> list:
+    """전체 유저의 총 볼륨(모든 운동의 무게×횟수 합) 순위."""
+    database = get_db()
+    totals = {}
+    for d in database.logs.find({}, {"user_id": 1, "sets": 1}):
+        uid = d["user_id"]
+        vol = 0.0
+        for s in d["sets"]:
+            try:
+                w = float(s["w"])
+                r = int(s["r"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            vol += w * r
+        if vol <= 0:
+            continue
+        totals[uid] = totals.get(uid, 0.0) + vol
+
+    if not totals:
+        return []
+
+    user_ids = []
+    for uid in totals:
+        try:
+            user_ids.append(ObjectId(uid))
+        except Exception:
+            pass
+    users = {str(u["_id"]): u["nickname"] for u in database.users.find({"_id": {"$in": user_ids}})}
+
+    rows = [
+        {"user_id": uid, "nickname": users.get(uid, "알수없음"), "total_volume": vol}
+        for uid, vol in totals.items()
+    ]
+    rows.sort(key=lambda r: -r["total_volume"])
+    return rows[:limit]
+
+
 # ================= 전체 통계 (관리자 대시보드) =================
 
 def get_dashboard_stats() -> dict:

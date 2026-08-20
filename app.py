@@ -213,6 +213,23 @@ st.markdown(
         .day-badge { font-size: 10.5px; padding: 2px 8px; }
         .exercise-thumb { max-width: 100%; }
     }
+    /* st.metric (연속기록/총기록일/총볼륨, 관리자 대시보드 등) 좁은 화면에서 글자가
+       칸을 넘어가거나 줄바꿈으로 어색해지는 것 방지 */
+    div[data-testid="stMetric"] {
+        background: #1B1D22;
+        border: 1px solid #33373F;
+        border-radius: 10px;
+        padding: 8px 4px;
+        text-align: center;
+    }
+    div[data-testid="stMetricLabel"] { justify-content: center; }
+    div[data-testid="stMetricLabel"] p { font-size: 12px !important; white-space: normal !important; }
+    div[data-testid="stMetricValue"] { justify-content: center; }
+    @media (max-width: 480px) {
+        div[data-testid="stMetricValue"] { font-size: 18px !important; }
+        div[data-testid="stMetricLabel"] p { font-size: 10.5px !important; }
+        div[data-testid="stMetric"] { padding: 6px 2px; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -315,8 +332,10 @@ def render_topnav(user: dict, admin: bool) -> str:
     # 3. 버튼을 밀어내던 안내 문구는 가장 아래에 단독으로 넓게 배치합니다.
     total = db.get_total_user_count()
     active = db.get_active_user_count()
+    stats = db.get_user_stats(user["id"], today_kst().isoformat())
+    streak_txt = f" · 🔥 연속 {stats['streak']}일" if stats["streak"] > 0 else ""
     admin_tag = " · 🛡️ 관리자" if admin else ""
-    st.caption(f"👋 {user['nickname']}님{admin_tag} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명")
+    st.caption(f"👋 {user['nickname']}님{admin_tag} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명{streak_txt}")
 
     st.divider()
     return current
@@ -335,11 +354,29 @@ def render_today(user: dict):
         unsafe_allow_html=True,
     )
 
-    day_labels = [f"{d['label']} · {d['part']}" for d in DAYS]
-    tab_objs = st.tabs(day_labels)
-
     log_for_date = db.get_log_for_date(user["id"], date_str)
     pr_map = db.get_personal_records(user["id"])
+
+    # ---- 이 날짜의 전체(부위 1~4 합산) 진행 요약 ----
+    total_all, done_all = 0, 0
+    for day in DAYS:
+        for ex in exercises_for_day(day["key"]):
+            total_all += 1
+            existing = log_for_date.get(ex["name"])
+            sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(ex["sets"])]
+            if existing is not None and all(
+                s.get("w") not in (None, "") and s.get("r") not in (None, "") for s in sets_state
+            ):
+                done_all += 1
+    overall_class = "progress-chip done" if total_all and done_all == total_all else "progress-chip"
+    st.markdown(
+        f"<div style='text-align:center; margin-bottom:10px;'>"
+        f"<span class='{overall_class}'>이 날짜 전체 {done_all}/{total_all} 완료</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    day_labels = [f"{d['label']} · {d['part']}" for d in DAYS]
+    tab_objs = st.tabs(day_labels)
 
     for tab, day in zip(tab_objs, DAYS):
         with tab:
@@ -441,9 +478,13 @@ def render_today(user: dict):
                     )
 
                     if st.button("이 운동 저장", key=f"{base_key}_save", use_container_width=True):
-                        db.save_exercise_log(user["id"], date_str, ex["name"], new_sets, memo_val)
-                        st.toast(f"{ex['name']} 저장 완료!", icon="✅")
-                        st.rerun()
+                        ok, err = db.validate_sets(new_sets)
+                        if not ok:
+                            st.error(err)
+                        else:
+                            db.save_exercise_log(user["id"], date_str, ex["name"], new_sets, memo_val)
+                            st.toast(f"{ex['name']} 저장 완료!", icon="✅")
+                            st.rerun()
 
 
 # ================= 마이페이지 =================
@@ -451,7 +492,13 @@ def render_mypage(user: dict):
     st.subheader("📖 마이페이지")
     st.caption(f"{user['nickname']}님의 운동 기록")
 
-    tab_pr, tab_history = st.tabs(["🏅 개인 최고기록", "🗓️ 기록 히스토리"])
+    stats = db.get_user_stats(user["id"], today_kst().isoformat())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🔥 연속 기록", f"{stats['streak']}일")
+    c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
+    c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
+
+    tab_pr, tab_history, tab_settings = st.tabs(["🏅 개인 최고기록", "🗓️ 기록 히스토리", "⚙️ 계정 설정"])
 
     with tab_pr:
         pr_map = db.get_personal_records(user["id"])
@@ -467,6 +514,9 @@ def render_mypage(user: dict):
     with tab_history:
         ui.render_history_tab(user)
 
+    with tab_settings:
+        ui.render_account_settings(user)
+
 
 # ================= 랭킹 =================
 def render_ranking(user: dict):
@@ -475,7 +525,7 @@ def render_ranking(user: dict):
 
     my_nickname = user["nickname"]
 
-    tab_champs, tab_detail = st.tabs(["👑 전체 종목 1위", "📋 종목별 TOP 20"])
+    tab_champs, tab_detail, tab_volume = st.tabs(["👑 전체 종목 1위", "📋 종목별 TOP 20", "🏋️ 총 볼륨"])
 
     with tab_champs:
         st.caption("각 운동마다 현재 최고 기록 보유자예요. 이름 옆에 뜨고 싶다면 지금 기록을 남겨보세요 🔥")
@@ -525,6 +575,21 @@ def render_ranking(user: dict):
                 )
             st.dataframe(table, use_container_width=True, hide_index=True)
 
+    with tab_volume:
+        st.caption("모든 운동의 무게×횟수를 합친 총 볼륨 순위예요. 꾸준함이 쌓이면 순위가 올라가요 💪")
+        rows = db.get_volume_leaderboard(limit=20)
+        if not rows:
+            st.info("아직 기록이 없어요.")
+        else:
+            table = []
+            for i, r in enumerate(rows, start=1):
+                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"{i}")
+                nickname = r["nickname"] + (" (나)" if r["nickname"] == my_nickname else "")
+                table.append(
+                    {"순위": medal, "닉네임": nickname, "총 볼륨(kg)": f"{r['total_volume']:,.0f}"}
+                )
+            st.dataframe(table, use_container_width=True, hide_index=True)
+
 
 # ================= 문의하기 =================
 def render_contact(user: dict):
@@ -560,6 +625,11 @@ def render_contact(user: dict):
             with st.container(border=True):
                 st.markdown(f"**[{q['category']}]** {q['content']}")
                 st.caption(f"{q['nickname']} · {date_str} · 상태: {q.get('status', '접수')}")
+                if q.get("answer"):
+                    st.markdown(
+                        f"<div class='tip-box'>🛠️ <b>운영자 답변</b><br>{q['answer']}</div>",
+                        unsafe_allow_html=True,
+                    )
 
 
 # ================= 관리자 =================
@@ -678,6 +748,18 @@ def render_admin(user: dict):
                         if st.button("삭제", key=f"del_inq_{q['_id']}"):
                             db.delete_inquiry(q["_id"])
                             st.rerun()
+
+                    answer_val = st.text_area(
+                        "답변",
+                        value=q.get("answer", ""),
+                        key=f"answer_{q['_id']}",
+                        placeholder="문의자에게 공개로 보여줄 답변을 남겨보세요.",
+                        label_visibility="collapsed",
+                    )
+                    if st.button("답변 저장", key=f"save_answer_{q['_id']}", use_container_width=True):
+                        db.answer_inquiry(q["_id"], answer_val)
+                        st.toast("답변을 저장했어요.", icon="✅")
+                        st.rerun()
 
 
 # ================= 라우팅 =================

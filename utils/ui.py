@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-페이지마다 반복되던 사이드바(네비게이션 + 로그아웃 + 접속 현황)와,
-모바일에서 버튼/입력창이 화면 밖으로 넘어가는 걸 막는 공통 CSS를 한 곳에 모아둔 공용 컴포넌트.
+모바일에서 버튼/입력창이 화면 밖으로 넘어가는 걸 막는 공통 CSS와,
+여러 화면(마이페이지 등)에서 재사용되는 UI 조각들을 모아둔 공용 컴포넌트.
 
-중요: app.py와 pages/*.py는 Streamlit 멀티페이지 구조상 서로 "다른 스크립트"라서
-app.py에 넣은 <style>은 다른 페이지(마이페이지/랭킹/문의/관리자)에는 전혀 적용되지 않는다.
-그래서 반드시 inject_base_css()를 모든 페이지(app.py 포함) 맨 앞에서 호출해야
-버튼 넘침 방지 스타일이 어느 페이지에서든 똑같이 적용된다.
+app.py는 pages/ 폴더 없이 단일 스크립트 + st.session_state 라우팅 구조이므로,
+반드시 inject_base_css()를 app.py 맨 앞에서 한 번만 호출하면 전체 화면에 적용된다.
 
 == 새로운 가로배치(컬럼) 줄을 만들 때 지켜야 하는 규칙 ==
 버튼 2개짜리 줄(예: 수정/삭제, 저장/취소)처럼 "여러 요소를 폭 안에서 균등하게 배치"하고
@@ -134,52 +132,69 @@ def inject_base_css():
     st.markdown(BASE_CSS, unsafe_allow_html=True)
 
 
-def require_login() -> dict:
-    """로그인 안 돼있으면 안내하고 멈춘다. 로그인 돼있으면 user dict 반환 + 접속 하트비트 갱신."""
-    if "user" not in st.session_state:
-        st.warning("먼저 로그인해주세요.")
-        st.page_link("app.py", label="🏠 로그인하러 가기")
-        st.stop()
+def render_account_settings(user: dict):
+    """마이페이지 '계정 설정' 탭: 닉네임/비밀번호 변경, 회원 탈퇴.
 
-    user = st.session_state["user"]
-    db.touch_presence(user["id"], user["username"], user["nickname"])
-    return user
-
-
-def render_sidebar(user: dict):
-    admin = db.is_admin(user["username"])
-
-    with st.sidebar:
-        st.markdown(f"### 👋 {user['nickname']}님")
-        if admin:
-            st.caption("🛡️ 관리자 계정")
-        else:
-            st.caption(f"@{user['username']}")
-
-        if st.button("로그아웃", use_container_width=True):
-            del st.session_state["user"]
+    닉네임은 랭킹/문의 게시판에 조회 시점에 users 컬렉션에서 다시 join해서 표시하므로
+    (기록에 닉네임을 박아두지 않음) 여기서 바꿔도 과거 기록/랭킹에 그대로 반영된다.
+    """
+    st.markdown("**✏️ 닉네임 변경**")
+    with st.form("nickname_form"):
+        new_nick = st.text_input("새 닉네임", value=user["nickname"], label_visibility="collapsed")
+        submitted = st.form_submit_button("닉네임 변경", use_container_width=True)
+    if submitted:
+        ok, msg = db.change_nickname(user["id"], new_nick)
+        if ok:
+            st.session_state["user"]["nickname"] = new_nick.strip()
+            st.success(msg)
             st.rerun()
+        else:
+            st.error(msg)
 
-        st.divider()
-        st.page_link("app.py", label="🏠 오늘의 루틴")
-        st.page_link("pages/1_mypage.py", label="📖 마이페이지")
-        st.page_link("pages/2_ranking.py", label="🏆 랭킹")
-        st.page_link("pages/3_contact.py", label="💬 문의하기")
-        if admin:
-            st.page_link("pages/4_admin.py", label="🛠️ 관리자 페이지")
+    st.markdown("---")
+    st.markdown("**🔒 비밀번호 변경**")
+    with st.form("password_form"):
+        cur_pw = st.text_input("현재 비밀번호", type="password", placeholder="현재 비밀번호")
+        new_pw = st.text_input("새 비밀번호", type="password", placeholder="새 비밀번호 (4자 이상)")
+        new_pw2 = st.text_input("새 비밀번호 확인", type="password", placeholder="새 비밀번호 확인")
+        submitted2 = st.form_submit_button("비밀번호 변경", use_container_width=True)
+    if submitted2:
+        if new_pw != new_pw2:
+            st.error("새 비밀번호가 서로 달라요.")
+        else:
+            ok, msg = db.change_password(user["id"], cur_pw, new_pw)
+            if ok:
+                st.success(msg)
+            else:
+                st.error(msg)
 
-        st.divider()
-        total = db.get_total_user_count()
-        active = db.get_active_user_count()
-        st.markdown(
-            f"<div style='font-size:12.5px; color:#9296A0; line-height:1.7;'>"
-            f"👥 총 가입자 <b style='color:#F2F1EC;'>{total}</b>명<br>"
-            f"🟢 현재 접속 <b style='color:#4ECDC4;'>{active}</b>명"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+    st.markdown("---")
+    st.markdown("**🚪 회원 탈퇴**")
+    st.caption("탈퇴하면 내 운동 기록이 모두 삭제되고 되돌릴 수 없어요.")
+    pw_for_delete = st.text_input("비밀번호 확인", type="password", key="del_acc_pw", placeholder="비밀번호 확인")
 
-    return admin
+    confirm_key = "confirm_self_delete"
+    if st.session_state.get(confirm_key):
+        if st.button("정말 탈퇴할까요? (되돌릴 수 없어요)", key="final_self_delete", type="primary", use_container_width=True):
+            ok, msg = db.delete_own_account(user["id"], pw_for_delete)
+            if ok:
+                st.session_state.pop(confirm_key, None)
+                del st.session_state["user"]
+                st.session_state.pop("page", None)
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+        if st.button("취소", key="cancel_self_delete", use_container_width=True):
+            st.session_state.pop(confirm_key, None)
+            st.rerun()
+    else:
+        if st.button("회원 탈퇴", key="start_self_delete", use_container_width=True):
+            if not pw_for_delete:
+                st.error("비밀번호를 입력해주세요.")
+            else:
+                st.session_state[confirm_key] = True
+                st.rerun()
 
 
 def render_log_entry_editable(user: dict, e: dict):
@@ -233,10 +248,14 @@ def render_log_entry_editable(user: dict, e: dict):
         with st.container(key=f"evenrow_logeditbtns_{entry_id}"):
             c1, c2 = st.columns(2)
             if c1.button("💾 저장", key=f"save_{entry_id}", use_container_width=True, type="primary"):
-                db.save_exercise_log(user["id"], e["date"], e["exercise_name"], new_sets, memo_val)
-                st.session_state[edit_key] = False
-                st.toast(f"{e['exercise_name']} 수정 완료!", icon="✅")
-                st.rerun()
+                ok, err = db.validate_sets(new_sets)
+                if not ok:
+                    st.error(err)
+                else:
+                    db.save_exercise_log(user["id"], e["date"], e["exercise_name"], new_sets, memo_val)
+                    st.session_state[edit_key] = False
+                    st.toast(f"{e['exercise_name']} 수정 완료!", icon="✅")
+                    st.rerun()
             if c2.button("취소", key=f"cancel_{entry_id}", use_container_width=True):
                 st.session_state[edit_key] = False
                 st.rerun()
