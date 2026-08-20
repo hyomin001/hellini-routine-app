@@ -69,8 +69,9 @@ div[data-testid="stHorizontalBlock"] {
 div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
     min-width: 0 !important;
     flex-shrink: 1 !important;
+    overflow: hidden !important;
 }
-div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"] * {
     min-width: 0 !important;
 }
 /* 인풋/버튼/셀렉트박스가 내부에서 컬럼 폭을 넘어가지 않도록 (사이트 전체 공통) */
@@ -127,6 +128,10 @@ div[class*="st-key-evenrow_"] div[data-testid="stHorizontalBlock"] {
 div[class*="st-key-evenrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
     width: auto !important;
     min-width: 0 !important;
+    overflow: hidden !important;
+}
+div[class*="st-key-evenrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] * {
+    min-width: 0 !important;
 }
 div[class*="st-key-evenrow_"] .stButton > button {
     white-space: nowrap !important;
@@ -141,18 +146,22 @@ div[class*="st-key-evenrow_"] .stButton > button {
    한 번 더 줄여서 절대 폭을 넘어가지 않게 여유를 둔다 */
 @media (max-width: 480px) {
     div[class*="st-key-evenrow_"] div[data-testid="stHorizontalBlock"] {
-        gap: 5px !important;
+        gap: 4px !important;
     }
-    div[class*="st-key-evenrow_"] .stButton > button {
-        font-size: 11.5px !important;
-        padding: 5px 2px !important;
-        min-height: 34px !important;
-    }
-}
-@media (max-width: 360px) {
     div[class*="st-key-evenrow_"] .stButton > button {
         font-size: 10.5px !important;
         padding: 4px 1px !important;
+        min-height: 32px !important;
+    }
+}
+@media (max-width: 360px) {
+    div[class*="st-key-evenrow_"] div[data-testid="stHorizontalBlock"] {
+        gap: 3px !important;
+    }
+    div[class*="st-key-evenrow_"] .stButton > button {
+        font-size: 9.5px !important;
+        padding: 3px 0px !important;
+        min-height: 30px !important;
     }
 }
 
@@ -166,6 +175,10 @@ div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] {
 }
 div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
     width: auto !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+}
+div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] * {
     min-width: 0 !important;
 }
 </style>
