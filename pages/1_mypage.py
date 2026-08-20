@@ -6,6 +6,8 @@ from utils import ui
 
 st.set_page_config(page_title="마이페이지 - 헬린이 루틴", page_icon="📖", layout="centered")
 
+ui.inject_base_css()
+
 user = ui.require_login()
 ui.render_sidebar(user)
 

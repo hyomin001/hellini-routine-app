@@ -19,6 +19,8 @@ def today_kst() -> dt.date:
 
 st.set_page_config(page_title="헬린이 루틴", page_icon="🏋️", layout="centered")
 
+ui.inject_base_css()
+
 # 사이드바(메뉴 버튼을 화면 안에서 쓰므로 사이드바 자체를 숨긴다)
 st.markdown(
     """
@@ -205,111 +207,11 @@ st.markdown(
         margin-bottom: 8px;
     }
 
-    /* ===== 모바일(폰 세로 화면) 최적화 ===== */
+    /* ===== 이 페이지 전용 요소들의 모바일 폰트/여백 축소 ===== */
     @media (max-width: 480px) {
-        .block-container {
-            padding-left: 0.9rem !important;
-            padding-right: 0.9rem !important;
-            padding-top: 1.2rem !important;
-        }
-        /* 버튼 터치 영역 확보 */
-        .stButton > button {
-            min-height: 42px;
-            font-size: 13.5px !important;
-            padding: 6px 6px !important;
-        }
-        /* 상단 네비게이션/문구 폰트 축소로 줄바꿈 방지 */
-        .stCaption, [data-testid="stCaptionContainer"] {
-            font-size: 12px !important;
-        }
-        div[data-testid="stExpander"] summary {
-            font-size: 14.5px;
-            padding: 10px 12px;
-        }
         .progress-chip { font-size: 11px; padding: 3px 9px; }
         .day-badge { font-size: 10.5px; padding: 2px 8px; }
         .exercise-thumb { max-width: 100%; }
-        /* 텍스트 입력 인풋 여백 축소로 세트 입력 3열이 덜 답답하게 */
-        div[data-testid="stTextInput"] input {
-            padding: 6px 8px !important;
-            font-size: 14px !important;
-        }
-        /* 컬럼 사이 간격 축소 (세트 입력, 상단 네비 버튼 등) */
-        div[data-testid="stHorizontalBlock"] {
-            gap: 0.5rem !important;
-        }
-        /* DAY 탭 라벨 축소 */
-        button[data-baseweb="tab"] {
-            font-size: 12.5px !important;
-            padding: 8px 10px !important;
-        }
-    }
-
-    /* ===== Streamlit이 좁은 화면에서 컬럼(가로배치)을 세로로 쌓아버리는 기본 동작을 막는다 =====
-       (세트/무게/횟수, 상단 메뉴 버튼 등이 세로로 길게 쌓이는 걸 방지) */
-    div[data-testid="stHorizontalBlock"] {
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        align-items: flex-start !important;
-        width: 100% !important;
-    }
-    /* width:auto로 강제하면 버튼/인풋 원래 크기만큼 각 컬럼이 늘어나서
-       화면 폭을 넘어가버림(가로 스크롤 발생). min-width만 0으로 풀어주고
-       실제 너비는 Streamlit이 계산한 비율(flex-basis)을 그대로 따르게 해서
-       화면 안에서 비율대로 줄어들도록 한다. */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        min-width: 0 !important;
-        flex-shrink: 1 !important;
-    }
-    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] > div {
-        min-width: 0 !important;
-    }
-    /* 인풋/버튼이 내부에서 컬럼 폭을 넘어가지 않도록 */
-    div[data-testid="stTextInput"] input,
-    div[data-testid="stTextInput"],
-    .stButton, .stButton > button {
-        min-width: 0 !important;
-        width: 100% !important;
-        box-sizing: border-box !important;
-    }
-    /* 만에 하나 안쪽에서 넘치는 요소가 있어도 화면 자체가
-       가로로 스크롤되지 않게 최종 안전장치 */
-    html, body, .stApp, section.main, .main .block-container {
-        overflow-x: hidden !important;
-    }
-
-    /* ===== 세트 입력 행(N세트 · 무게 · 횟수) : flex 비율 계산 대신
-       CSS Grid로 확실하게 폭을 3등분해서 절대 화면을 넘어가지 않게 고정 =====
-       (원본 HTML의 .set-row { display:grid; grid-template-columns:32px 1fr 1fr; } 와 동일한 방식) */
-    div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] {
-        display: grid !important;
-        grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1fr) !important;
-        gap: 8px !important;
-        width: 100% !important;
-    }
-    div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        width: auto !important;
-        min-width: 0 !important;
-    }
-
-    /* ===== 상단 네비게이션 버튼 줄 : 버튼 개수에 상관없이 항상 균등하게 화면 폭 안에서 나눔 ===== */
-    div[class*="st-key-navrow_"] div[data-testid="stHorizontalBlock"] {
-        display: grid !important;
-        grid-auto-flow: column !important;
-        grid-auto-columns: minmax(0, 1fr) !important;
-        gap: 8px !important;
-        width: 100% !important;
-    }
-    div[class*="st-key-navrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-        width: auto !important;
-        min-width: 0 !important;
-    }
-    div[class*="st-key-navrow_"] .stButton > button {
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-        padding-left: 2px !important;
-        padding-right: 2px !important;
     }
     </style>
     """,
@@ -395,7 +297,7 @@ def render_topnav(user: dict, admin: bool) -> str:
     chunk = 3
     for i in range(0, len(pages), chunk):
         row = pages[i : i + chunk]
-        with st.container(key=f"navrow_{i}"):
+        with st.container(key=f"evenrow_nav_{i}"):
             cols = st.columns(len(row))
             for col, (key, label) in zip(cols, row):
                 # 2. 키값이 logout일 때만 삭제 로직을 실행하도록 분기 처리합니다.
