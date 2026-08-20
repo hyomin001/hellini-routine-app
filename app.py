@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import base64
 import datetime as dt
 
 import streamlit as st
@@ -6,6 +7,7 @@ import streamlit.components.v1 as components
 
 from utils import db
 from utils import ui
+from utils import card
 from utils.data import DAYS, exercises_for_day, ALL_EXERCISE_NAMES
 
 # Streamlit Cloud 서버는 UTC 기준으로 동작하므로 dt.date.today()를 그대로 쓰면
@@ -371,6 +373,7 @@ def render_auth():
 NAV_PAGES = [
     ("today", "🏠 오늘"),
     ("mypage", "📖 기록"),
+    ("feed", "📸 인증"),
     ("ranking", "🏆 랭킹"),
     ("contact", "💬 문의"),
 ]
@@ -896,6 +899,89 @@ def render_admin(user: dict):
                         st.rerun()
 
 
+# ================= 인증샷 게시판 =================
+def render_feed(user: dict):
+    st.subheader("📸 인증샷 게시판")
+    st.caption("오늘 운동한 인증샷을 올리고, 서로 댓글과 리액션으로 응원해줘요.")
+
+    today_str = today_kst().isoformat()
+    existing = db.get_post_by_user_date(user["id"], today_str)
+
+    with st.expander("📷 오늘 인증샷 올리기 / 수정하기", expanded=existing is None):
+        if existing and existing.get("photo_b64"):
+            st.image(base64.b64decode(existing["photo_b64"]), width=220, caption="현재 등록된 사진")
+        with st.form("post_form", clear_on_submit=False):
+            photo = st.file_uploader("사진 선택 (jpg/png)", type=["jpg", "jpeg", "png"], key="post_photo")
+            caption = st.text_area(
+                "한마디",
+                value=existing.get("caption", "") if existing else "",
+                placeholder="오늘 하체데이 죽는 줄... 다들 화이팅!",
+                key="post_caption",
+            )
+            submitted = st.form_submit_button("게시하기", use_container_width=True)
+        if submitted:
+            if not photo and not existing:
+                st.error("사진을 선택해주세요.")
+            else:
+                photo_bytes = photo.read() if photo else None
+                db.create_or_update_post(user["id"], user["nickname"], today_str, photo_bytes, caption)
+                st.toast("인증샷을 올렸어요!", icon="📸")
+                st.rerun()
+
+    st.divider()
+    posts = db.get_feed_posts(limit=50)
+    if not posts:
+        st.info("아직 올라온 인증샷이 없어요. 첫 인증샷의 주인공이 되어보세요!")
+        return
+
+    is_admin = db.is_admin(user["username"])
+
+    for p in posts:
+        post_id = str(p["_id"])
+        is_mine = p["user_id"] == user["id"]
+        with st.container(border=True):
+            mine_tag = " · 나" if is_mine else ""
+            st.markdown(f"**{p['nickname']}**{mine_tag} · {p['date']}")
+            if p.get("photo_b64"):
+                st.image(base64.b64decode(p["photo_b64"]), use_container_width=True)
+            if p.get("caption"):
+                st.markdown(p["caption"])
+
+            reactions = p.get("reactions", {})
+            with st.container(key=f"evenrow_react_{post_id}"):
+                cols = st.columns(len(db.REACTION_EMOJIS))
+                for emoji, rcol in zip(db.REACTION_EMOJIS, cols):
+                    users = reactions.get(emoji, [])
+                    reacted = user["id"] in users
+                    label = f"{emoji} {len(users)}" if users else emoji
+                    if rcol.button(label, key=f"react_{emoji}_{post_id}", use_container_width=True, type="primary" if reacted else "secondary"):
+                        db.toggle_reaction(p["_id"], user["id"], emoji)
+                        st.rerun()
+
+            comments = p.get("comments", [])
+            if comments:
+                for c in comments:
+                    cc1, cc2 = st.columns([5, 1])
+                    cc1.markdown(f"💬 **{c['nickname']}** {c['text']}")
+                    if (c.get("user_id") == user["id"] or is_admin) and cc2.button("삭제", key=f"delcm_{post_id}_{c['_id']}"):
+                        db.delete_comment(p["_id"], c["_id"], user["id"], is_admin)
+                        st.rerun()
+
+            with st.form(f"comment_form_{post_id}", clear_on_submit=True):
+                cco1, cco2 = st.columns([4, 1])
+                comment_text = cco1.text_input("댓글", key=f"comment_{post_id}", placeholder="댓글 달기", label_visibility="collapsed")
+                comment_submitted = cco2.form_submit_button("등록", use_container_width=True)
+            if comment_submitted and comment_text.strip():
+                db.add_comment(p["_id"], user["id"], user["nickname"], comment_text)
+                st.rerun()
+
+            if is_mine or is_admin:
+                if st.button("🗑️ 게시물 삭제", key=f"delpost_{post_id}"):
+                    db.delete_post(p["_id"], user["id"], is_admin)
+                    st.toast("삭제했어요.", icon="🗑️")
+                    st.rerun()
+
+
 # ================= 라우팅 =================
 if "user" not in st.session_state:
     render_auth()
@@ -906,6 +992,8 @@ else:
 
     if _page == "mypage":
         render_mypage(_user)
+    elif _page == "feed":
+        render_feed(_user)
     elif _page == "ranking":
         render_ranking(_user)
     elif _page == "contact":

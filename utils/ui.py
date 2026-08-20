@@ -401,5 +401,32 @@ def render_history_tab(user: dict):
     for date_str in sorted(by_date.keys(), reverse=True):
         entries = by_date[date_str]
         with st.expander(f"{date_str} · 운동 {len(entries)}개"):
+            render_card_download_button(user, date_str)
             for e in entries:
                 render_log_entry_editable(user, e)
+
+
+def render_card_download_button(user: dict, date_str: str):
+    """그 날짜의 기록을 예쁜 인스타 스토리용 PNG 카드로 만들어 다운로드하는 버튼."""
+    from utils import card as _card
+
+    cache_key = f"card_png_{user['id']}_{date_str}"
+    if st.button("🎴 오운완 인증카드 만들기", key=f"makecard_{date_str}", use_container_width=True):
+        rows, total_volume = db.get_date_summary(user["id"], date_str)
+        stats = db.get_user_stats(user["id"], date_str)
+        png_bytes = _card.generate_workout_card(
+            user["nickname"], date_str, rows, total_volume, stats["streak"]
+        )
+        st.session_state[cache_key] = png_bytes
+
+    if st.session_state.get(cache_key):
+        st.image(st.session_state[cache_key], width=200)
+        st.download_button(
+            "⬇️ 카드 이미지 다운로드",
+            data=st.session_state[cache_key],
+            file_name=f"헬린이루틴_오운완_{date_str}.png",
+            mime="image/png",
+            key=f"dlcard_{date_str}",
+            use_container_width=True,
+        )
+    st.markdown("---")

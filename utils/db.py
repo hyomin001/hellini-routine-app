@@ -3,6 +3,8 @@
 MongoDB 데이터 계층.
 연결 정보는 st.secrets["MONGO_URI"] 에서 읽는다 (.streamlit/secrets.toml 참고).
 """
+import base64
+import io
 import secrets as _secrets
 import string as _string
 from datetime import datetime, timedelta
@@ -11,6 +13,7 @@ from typing import Optional
 import streamlit as st
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from bson import ObjectId
+from PIL import Image, ImageOps
 
 from utils.auth import hash_password, verify_password
 
@@ -49,6 +52,8 @@ def init_indexes():
     db.inquiries.create_index([("created_at", DESCENDING)])
     db.presence.create_index("user_id", unique=True)
     db.presence.create_index("last_seen")
+    db.posts.create_index([("user_id", ASCENDING), ("date", ASCENDING)], unique=True)
+    db.posts.create_index([("created_at", DESCENDING)])
 
 
 # ================= USERS =================
@@ -604,6 +609,28 @@ def get_workout_dates(user_id: str) -> set:
     return {d["date"] for d in get_db().logs.find({"user_id": user_id}, {"date": 1})}
 
 
+# ================= 오운완 인증카드용 날짜 요약 =================
+
+def get_date_summary(user_id: str, date_str: str):
+    """해당 날짜에 기록한 운동들의 (운동명, 최고세트) 목록 + 그 날의 총 볼륨.
+    반환: (rows, total_volume) — rows = [{"exercise_name","weight","reps"}], 기록 없으면 ([], 0.0)"""
+    docs = list(get_db().logs.find({"user_id": user_id, "date": date_str}))
+    rows = []
+    total_volume = 0.0
+    for d in docs:
+        best = _best_from_sets(d["sets"])
+        for s in d["sets"]:
+            try:
+                total_volume += float(s["w"]) * int(s["r"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        if best is None:
+            continue
+        w, r = best
+        rows.append({"exercise_name": d["exercise_name"], "weight": w, "reps": r})
+    return rows, total_volume
+
+
 # ================= 뱃지 / 업적 =================
 
 BADGE_DEFS = [
@@ -652,3 +679,105 @@ def get_badges(user_id: str, nickname: str, today_str: str, all_exercise_count: 
         "allrounder": len(pr_map) >= all_exercise_count,
     }
     return [dict(b, achieved=achieved.get(b["id"], False)) for b in BADGE_DEFS]
+
+
+# ================= 인증샷 게시판 =================
+
+REACTION_EMOJIS = ["🔥", "💪", "👏"]
+MAX_PHOTO_WIDTH = 1000
+_JPEG_QUALITY = 72
+
+
+def compress_photo_to_b64(file_bytes: bytes) -> str:
+    """업로드된 이미지를 리사이즈 + JPEG 압축해서 base64 문자열로 반환 (DB 용량 절약)."""
+    img = Image.open(io.BytesIO(file_bytes))
+    img = ImageOps.exif_transpose(img)  # 휴대폰 세로사진 회전 방향 보정
+    img = img.convert("RGB")
+    if img.width > MAX_PHOTO_WIDTH:
+        ratio = MAX_PHOTO_WIDTH / img.width
+        img = img.resize((MAX_PHOTO_WIDTH, int(img.height * ratio)))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=_JPEG_QUALITY)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def create_or_update_post(user_id: str, nickname: str, date_str: str, file_bytes: Optional[bytes], caption: str):
+    """오늘 인증샷을 올리거나(같은 날짜에 이미 있으면) 캡션/사진을 수정한다."""
+    db = get_db()
+    update = {"nickname": nickname, "caption": (caption or "").strip(), "updated_at": datetime.utcnow()}
+    if file_bytes:
+        update["photo_b64"] = compress_photo_to_b64(file_bytes)
+    db.posts.update_one(
+        {"user_id": user_id, "date": date_str},
+        {
+            "$set": update,
+            "$setOnInsert": {"created_at": datetime.utcnow(), "comments": [], "reactions": {}},
+        },
+        upsert=True,
+    )
+    return True, "인증샷을 올렸어요!"
+
+
+def get_feed_posts(limit: int = 50) -> list:
+    return list(get_db().posts.find().sort("created_at", DESCENDING).limit(limit))
+
+
+def get_post_by_user_date(user_id: str, date_str: str) -> Optional[dict]:
+    return get_db().posts.find_one({"user_id": user_id, "date": date_str})
+
+
+def delete_post(post_id, user_id: str, is_admin: bool = False):
+    database = get_db()
+    q = {"_id": ObjectId(post_id)}
+    if not is_admin:
+        q["user_id"] = user_id
+    database.posts.delete_one(q)
+
+
+def add_comment(post_id, user_id: str, nickname: str, text: str):
+    text = (text or "").strip()
+    if not text:
+        return
+    get_db().posts.update_one(
+        {"_id": ObjectId(post_id)},
+        {
+            "$push": {
+                "comments": {
+                    "_id": ObjectId(),
+                    "user_id": user_id,
+                    "nickname": nickname,
+                    "text": text,
+                    "created_at": datetime.utcnow(),
+                }
+            }
+        },
+    )
+
+
+def delete_comment(post_id, comment_id, user_id: str, is_admin: bool = False):
+    database = get_db()
+    post = database.posts.find_one({"_id": ObjectId(post_id)})
+    if not post:
+        return
+    comments = post.get("comments", [])
+    new_comments = [
+        c for c in comments
+        if not (str(c.get("_id")) == str(comment_id) and (is_admin or c.get("user_id") == user_id))
+    ]
+    database.posts.update_one({"_id": ObjectId(post_id)}, {"$set": {"comments": new_comments}})
+
+
+def toggle_reaction(post_id, user_id: str, emoji: str):
+    """이미 누른 리액션이면 취소, 아니면 추가."""
+    database = get_db()
+    post = database.posts.find_one({"_id": ObjectId(post_id)})
+    if not post:
+        return
+    reactions = post.get("reactions", {})
+    users = set(reactions.get(emoji, []))
+    if user_id in users:
+        users.discard(user_id)
+    else:
+        users.add(user_id)
+    reactions[emoji] = list(users)
+    database.posts.update_one({"_id": ObjectId(post_id)}, {"$set": {"reactions": reactions}})
