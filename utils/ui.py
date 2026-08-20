@@ -423,22 +423,25 @@ def render_streak_heatmap(workout_dates: set, weeks: int = 14):
 
 def render_badges(badges: list):
     """뱃지 목록을 카드 그리드로 렌더링 (달성 여부에 따라 색 다르게)."""
-    cols = st.columns(3)
-    for i, b in enumerate(badges):
-        with cols[i % 3]:
-            if b["achieved"]:
-                bg, border, opacity = "#1E241E", "#4ECDC4", "1"
-            else:
-                bg, border, opacity = "#1B1D22", "#33373F", "0.45"
-            st.markdown(
-                f"<div style='background:{bg}; border:1px solid {border}; border-radius:12px; "
-                f"padding:10px 8px; text-align:center; margin-bottom:8px; opacity:{opacity};'>"
-                f"<div style='font-size:22px;'>{b['icon']}</div>"
-                f"<div style='font-size:12.5px; font-weight:700; color:#F2F1EC; margin-top:2px;'>{b['name']}</div>"
-                f"<div style='font-size:10.5px; color:#9296A0;'>{b['need']}</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
+    with st.container(key="evenrow_badges"):
+        cols = st.columns(3)
+        for i, b in enumerate(badges):
+            with cols[i % 3]:
+                if b["achieved"]:
+                    bg, border, opacity = "#1E241E", "#4ECDC4", "1"
+                else:
+                    bg, border, opacity = "#1B1D22", "#33373F", "0.45"
+                st.markdown(
+                    f"<div style='background:{bg}; border:1px solid {border}; border-radius:12px; "
+                    f"padding:10px 6px; text-align:center; margin-bottom:8px; opacity:{opacity}; "
+                    f"overflow:hidden;'>"
+                    f"<div style='font-size:22px;'>{b['icon']}</div>"
+                    f"<div style='font-size:12px; font-weight:700; color:#F2F1EC; margin-top:2px; "
+                    f"overflow-wrap:break-word; word-break:break-word;'>{b['name']}</div>"
+                    f"<div style='font-size:10px; color:#9296A0; overflow-wrap:break-word; word-break:break-word;'>{b['need']}</div>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def render_history_tab(user: dict):
