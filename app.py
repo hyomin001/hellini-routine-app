@@ -268,11 +268,21 @@ st.markdown(
     }
     div[data-testid="stMetricLabel"] { justify-content: center; }
     div[data-testid="stMetricLabel"] p { font-size: 12px !important; white-space: normal !important; }
-    div[data-testid="stMetricValue"] { justify-content: center; }
+    div[data-testid="stMetricValue"] {
+        justify-content: center;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        line-height: 1.15 !important;
+    }
     @media (max-width: 480px) {
-        div[data-testid="stMetricValue"] { font-size: 18px !important; }
-        div[data-testid="stMetricLabel"] p { font-size: 10.5px !important; }
-        div[data-testid="stMetric"] { padding: 6px 2px; }
+        div[data-testid="stMetricValue"] { font-size: 16px !important; }
+        div[data-testid="stMetricLabel"] p { font-size: 10px !important; }
+        div[data-testid="stMetric"] { padding: 6px 1px; }
+    }
+    @media (max-width: 360px) {
+        div[data-testid="stMetricValue"] { font-size: 13.5px !important; }
+        div[data-testid="stMetricLabel"] p { font-size: 9px !important; }
+        div[data-testid="stMetric"] { padding: 4px 1px; }
     }
     </style>
     """,
@@ -579,10 +589,11 @@ def render_mypage(user: dict):
     st.caption(f"{user['nickname']}님의 운동 기록")
 
     stats = db.get_user_stats(user["id"], today_kst().isoformat())
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🔥 연속 기록", f"{stats['streak']}일")
-    c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
-    c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
+    with st.container(key="evenrow_mypage_stats"):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🔥 연속 기록", f"{stats['streak']}일")
+        c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
+        c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
 
     ui.render_streak_heatmap(db.get_workout_dates(user["id"]))
 
@@ -761,11 +772,12 @@ def render_admin(user: dict):
     with tab_dash:
         stats = db.get_dashboard_stats()
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("👥 총 가입자", f"{stats['total_users']}명")
-        c2.metric("🟢 현재 접속자", f"{stats['active_users']}명")
-        c3.metric("📝 총 운동 기록", f"{stats['total_logs']}건")
-        c4.metric("💬 미처리 문의", f"{stats['open_inquiries']}건")
+        with st.container(key="evenrow_admin_stats"):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("👥 총 가입자", f"{stats['total_users']}명")
+            c2.metric("🟢 현재 접속자", f"{stats['active_users']}명")
+            c3.metric("📝 총 운동 기록", f"{stats['total_logs']}건")
+            c4.metric("💬 미처리 문의", f"{stats['open_inquiries']}건")
 
         st.divider()
         st.markdown("**🟢 지금 접속 중인 사람**")
@@ -961,16 +973,18 @@ def render_feed(user: dict):
             comments = p.get("comments", [])
             if comments:
                 for c in comments:
-                    cc1, cc2 = st.columns([5, 1])
-                    cc1.markdown(f"💬 **{c['nickname']}** {c['text']}")
-                    if (c.get("user_id") == user["id"] or is_admin) and cc2.button("삭제", key=f"delcm_{post_id}_{c['_id']}"):
-                        db.delete_comment(p["_id"], c["_id"], user["id"], is_admin)
-                        st.rerun()
+                    with st.container(key=f"evenrow_comment_{post_id}_{c['_id']}"):
+                        cc1, cc2 = st.columns([5, 1])
+                        cc1.markdown(f"💬 **{c['nickname']}** {c['text']}")
+                        if (c.get("user_id") == user["id"] or is_admin) and cc2.button("삭제", key=f"delcm_{post_id}_{c['_id']}"):
+                            db.delete_comment(p["_id"], c["_id"], user["id"], is_admin)
+                            st.rerun()
 
             with st.form(f"comment_form_{post_id}", clear_on_submit=True):
-                cco1, cco2 = st.columns([4, 1])
-                comment_text = cco1.text_input("댓글", key=f"comment_{post_id}", placeholder="댓글 달기", label_visibility="collapsed")
-                comment_submitted = cco2.form_submit_button("등록", use_container_width=True)
+                with st.container(key=f"evenrow_commentinput_{post_id}"):
+                    cco1, cco2 = st.columns([4, 1])
+                    comment_text = cco1.text_input("댓글", key=f"comment_{post_id}", placeholder="댓글 달기", label_visibility="collapsed")
+                    comment_submitted = cco2.form_submit_button("등록", use_container_width=True)
             if comment_submitted and comment_text.strip():
                 db.add_comment(p["_id"], user["id"], user["nickname"], comment_text)
                 st.rerun()
