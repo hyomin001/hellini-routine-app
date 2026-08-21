@@ -24,6 +24,7 @@ LATEST_DIR = Path(__file__).resolve().parent.parent / "backups" / "latest"
 
 
 def _object_hook(d):
+    """JSON을 파이썬 객체로 읽어올 때 ObjectId·날짜 문자열 등을 원래 타입으로 복원해준다."""
     if "_id" in d and isinstance(d["_id"], str):
         try:
             d["_id"] = ObjectId(d["_id"])
@@ -39,6 +40,7 @@ def _object_hook(d):
 
 
 def main():
+    """backups 폴더의 JSON 백업 파일을 읽어 MongoDB 컬렉션으로 복원한다(재해복구/로컬 개발용, 커맨드라인에서 수동 실행)."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true", help="대상 컬렉션에 데이터가 있어도 지우고 덮어쓰기")
     args = parser.parse_args()

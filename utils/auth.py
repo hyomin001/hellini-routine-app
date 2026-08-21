@@ -19,5 +19,6 @@ def hash_password(password: str, salt_hex: Optional[str] = None) -> Tuple[str, s
 
 
 def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
+    """입력한 비밀번호가 저장된 salt/hash와 일치하는지 검증한다."""
     _, dk_hex = hash_password(password, salt_hex)
     return dk_hex == hash_hex

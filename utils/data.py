@@ -32,6 +32,7 @@ ALL_EXERCISE_NAMES = list(EX_BY_NAME.keys())
 
 
 def exercises_for_part(part_key: str):
+    """특정 부위(PART) 키에 해당하는 운동 목록을 반환한다."""
     return [e for e in EX if e["part"] == part_key]
 
 

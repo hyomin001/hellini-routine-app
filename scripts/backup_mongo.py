@@ -26,6 +26,7 @@ LATEST_DIR = BACKUP_DIR / "latest"
 
 
 def _default(obj):
+    """JSON으로 그대로 직렬화할 수 없는 타입(ObjectId, datetime 등)을 문자열로 변환해준다."""
     if isinstance(obj, ObjectId):
         return str(obj)
     if isinstance(obj, datetime):
@@ -34,6 +35,7 @@ def _default(obj):
 
 
 def main():
+    """MongoDB의 모든 컬렉션을 읽어 JSON 파일로 내보내고 backups/latest 폴더에 저장한다. GitHub Actions(backup-mongo.yml)가 매일 자동 실행한다."""
     uri = os.environ.get("MONGO_URI")
     if not uri:
         print("MONGO_URI 환경변수가 없습니다. (GitHub Actions Secrets 또는 로컬 환경변수 확인)", file=sys.stderr)

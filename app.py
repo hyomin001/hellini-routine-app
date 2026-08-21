@@ -1,4 +1,29 @@
 # -*- coding: utf-8 -*-
+"""
+헬린이 루틴 - 메인 엔트리 파일 (Streamlit 앱의 시작점).
+
+이 앱은 서로 다른 화면(오늘의 루틴 / 마이페이지 / 랭킹 / 문의 / 관리자 / 인증샷 피드)을
+별도의 pages/*.py 파일로 나누지 않고, 이 파일 하나에서 st.session_state["page"] 값에 따라
+render_xxx() 함수를 골라 호출하는 방식(SPA처럼 동작)으로 화면을 전환한다.
+자세한 이유는 README의 "화면 이동 방식" 섹션 참고.
+
+파일 구성:
+  1) KST 시간 처리 (today_kst)
+  2) 휴식 타이머 위젯 (render_rest_timer) - 순수 HTML/JS 컴포넌트
+  3) 커스텀 CSS 주입
+  4) 로그인/회원가입 화면 (render_auth)
+  5) 상단 네비게이션 (render_topnav)
+  6) 오늘의 루틴 - 근력/유산소 (render_today, render_cardio_today)
+  7) 마이페이지 (render_mypage)
+  8) 랭킹 (render_ranking)
+  9) 문의하기 (render_contact)
+  10) 관리자 페이지 (render_admin)
+  11) 인증샷 게시판 (render_feed)
+  12) 파일 맨 아래: 실제 라우팅(현재 로그인 여부·페이지 값에 따라 위 함수 중 하나를 호출)
+
+실제 데이터베이스 로직은 utils/db.py, 화면 조각 UI는 utils/ui.py,
+운동 종류/부위 데이터는 utils/data.py, 인증샷 카드 이미지 생성은 utils/card.py에 있다.
+"""
 import base64
 import datetime as dt
 
@@ -29,6 +54,7 @@ KST = dt.timezone(dt.timedelta(hours=9))
 
 
 def today_kst() -> dt.date:
+    """KST(한국시간, UTC+9) 기준 오늘 날짜를 반환한다. Streamlit Cloud 서버가 UTC로 동작하므로 이 함수를 통해서만 '오늘'을 구한다."""
     return dt.datetime.now(KST).date()
 
 st.set_page_config(page_title="헬린이 루틴", page_icon="🏋️", layout="centered")
@@ -305,6 +331,7 @@ st.markdown(
 
 @st.cache_resource(show_spinner=False)
 def _init_once():
+    """세션 최초 진입 시 한 번만 필요한 초기화(접속 현황 기록 등)를 처리한다."""
     db.init_indexes()
     return True
 
@@ -319,6 +346,7 @@ except Exception as e:
 
 # ================= 로그인 / 회원가입 =================
 def render_auth():
+    """로그인 / 회원가입 / 비밀번호 찾기 화면을 그린다. 로그인에 성공하면 st.session_state['user']에 사용자 정보를 저장한다."""
     st.markdown("### 🏋️ 헬린이 루틴")
     st.caption("로그인하고 내 운동 기록을 저장해보세요.")
 
@@ -402,6 +430,7 @@ NAV_PAGES = [
 ]
 
 def render_topnav(user: dict, admin: bool) -> str:
+    """화면 상단의 페이지 이동 버튼(오늘 / 기록 / 랭킹 / 문의 / 관리)을 그리고, 사용자가 클릭한 버튼에 해당하는 페이지 키를 반환한다."""
     db.touch_presence(user["id"], user["username"], user["nickname"])
 
     # 1. 페이지 목록 마지막에 로그아웃을 추가합니다.
@@ -441,6 +470,7 @@ def render_topnav(user: dict, admin: bool) -> str:
 
 # ================= 오늘의 루틴 =================
 def render_today(user: dict):
+    """'오늘의 루틴' 페이지. 날짜·부위 선택, 운동별 세트 입력 및 저장, 휴식 타이머, 오늘 인증 현황을 렌더링한다."""
     selected_date = st.date_input("날짜", value=today_kst(), key="today_date")
     date_str = selected_date.isoformat()
 
@@ -609,6 +639,7 @@ def render_today(user: dict):
 
 # ================= 오늘의 루틴 (유산소) =================
 def render_cardio_today(user: dict, date_str: str):
+    """'오늘의 루틴' 화면 중 유산소 탭. 유산소 운동을 선택해 시간/거리/칼로리를 입력하고 저장한다."""
     cardio_log_for_date = db.get_cardio_log_for_date(user["id"], date_str)
     cardio_pr_map = db.get_cardio_personal_records(user["id"])
 
@@ -746,6 +777,7 @@ def render_cardio_today(user: dict, date_str: str):
 
 # ================= 마이페이지 =================
 def render_mypage(user: dict):
+    """마이페이지. 연속 기록일·총 기록일·총 볼륨 요약, 개인 최고기록(PR), 기록 히스토리, 계정 설정을 보여준다."""
     st.subheader("📖 마이페이지")
     st.caption(f"{user['nickname']}님의 운동 기록")
 
@@ -825,6 +857,7 @@ def render_mypage(user: dict):
 
 # ================= 랭킹 =================
 def render_ranking(user: dict):
+    """랭킹 페이지. 종목별 TOP20 순위, 총 볼륨 랭킹, 종목별 챔피언 현황을 보여준다."""
     st.subheader("🏆 운동별 랭킹")
     st.caption("가장 무거운 무게로, 같은 무게면 가장 많은 횟수로 든 사람이 1등이에요.")
 
@@ -910,6 +943,7 @@ def render_ranking(user: dict):
 
 # ================= 문의하기 =================
 def render_contact(user: dict):
+    """문의하기 페이지. 사용자가 새 문의를 등록하고, 본인이 남긴 문의 내역과 관리자 답변을 확인한다."""
     st.subheader("💬 문의하기")
     st.caption("추가했으면 하는 운동, 기능 개선 아이디어, 버그 제보 등 자유롭게 남겨주세요.")
 
@@ -951,6 +985,7 @@ def render_contact(user: dict):
 
 # ================= 관리자 =================
 def render_admin(user: dict):
+    """관리자 전용 페이지. 대시보드 통계, 회원 관리(검색/삭제/비밀번호 강제 초기화), 문의 관리(상태 변경/답변)를 제공한다."""
     st.subheader("🛠️ 관리자 페이지")
     st.caption(f"{user['nickname']}님, 어서오세요. 여기는 운영자만 볼 수 있어요.")
 
@@ -1100,6 +1135,7 @@ def render_admin(user: dict):
 
 # ================= 인증샷 게시판 =================
 def render_feed(user: dict):
+    """인증샷 게시판 페이지. 사진 업로드/수정, 다른 사람들의 피드 열람, 댓글과 리액션 기능을 제공한다."""
     st.subheader("📸 인증샷 게시판")
     st.caption("오늘 운동한 인증샷을 올리고, 서로 댓글과 리액션으로 응원해줘요.")
 
@@ -1184,6 +1220,9 @@ def render_feed(user: dict):
 
 
 # ================= 라우팅 =================
+# 로그인이 안 되어 있으면 무조건 로그인/회원가입 화면.
+# 로그인이 되어 있으면 render_topnav()가 반환한 페이지 키(_page)에 맞는
+# render_xxx() 함수 하나만 호출한다. (pages/ 폴더 없이 이 if/elif로 화면을 전환)
 if "user" not in st.session_state:
     render_auth()
 else:

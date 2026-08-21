@@ -31,16 +31,19 @@ ACTIVE_WINDOW_MINUTES = 5
 
 @st.cache_resource(show_spinner=False)
 def get_client() -> MongoClient:
+    """MongoDB 클라이언트를 생성해 캐시한다(st.cache_resource로 앱 실행 중 커넥션을 재사용)."""
     uri = st.secrets["MONGO_URI"]
     return MongoClient(uri)
 
 
 def get_db():
+    """기본 데이터베이스 객체를 반환한다."""
     client = get_client()
     return client[st.secrets.get("MONGO_DB_NAME", "hellini_routine")]
 
 
 def init_indexes():
+    """자주 조회하는 컬렉션들에 필요한 인덱스를 생성한다(이미 있으면 무시된다)."""
     db = get_db()
     db.users.create_index("username", unique=True)
     db.users.create_index("nickname", unique=True)
@@ -64,10 +67,12 @@ def init_indexes():
 # ================= USERS =================
 
 def username_exists(username: str) -> bool:
+    """해당 아이디로 가입된 회원이 이미 있는지 확인한다."""
     return get_db().users.find_one({"username": username}) is not None
 
 
 def nickname_exists(nickname: str) -> bool:
+    """해당 닉네임을 사용 중인 회원이 이미 있는지 확인한다."""
     return get_db().users.find_one({"nickname": nickname}) is not None
 
 
@@ -78,6 +83,7 @@ def create_user(
     security_question: Optional[str] = None,
     security_answer: Optional[str] = None,
 ):
+    """신규 회원을 생성한다. 비밀번호 해시 처리와 보안 질문 저장을 포함한다."""
     username = username.strip()
     nickname = nickname.strip()
     if not username or not password or not nickname:
@@ -106,6 +112,7 @@ def create_user(
 
 
 def authenticate(username: str, password: str) -> Optional[dict]:
+    """아이디/비밀번호로 로그인 인증을 수행하고, 성공하면 사용자 문서를 반환한다(실패 시 None)."""
     user = get_db().users.find_one({"username": username.strip()})
     if not user:
         return None
@@ -115,6 +122,7 @@ def authenticate(username: str, password: str) -> Optional[dict]:
 
 
 def get_user_by_id(user_id: str) -> Optional[dict]:
+    """user_id로 사용자 문서를 조회한다."""
     try:
         return get_db().users.find_one({"_id": ObjectId(user_id)})
     except Exception:
@@ -122,10 +130,12 @@ def get_user_by_id(user_id: str) -> Optional[dict]:
 
 
 def get_total_user_count() -> int:
+    """전체 가입자 수를 반환한다."""
     return get_db().users.count_documents({})
 
 
 def list_all_users(limit: int = 1000) -> list:
+    """관리자 페이지에서 쓰는 전체 회원 목록을 반환한다."""
     return list(get_db().users.find().sort("created_at", DESCENDING).limit(limit))
 
 
@@ -149,6 +159,7 @@ def get_security_question(username: str) -> Optional[str]:
 
 
 def reset_password_with_security(username: str, answer: str, new_password: str):
+    """보안 질문에 대한 답을 확인한 뒤 비밀번호를 재설정한다."""
     user = get_db().users.find_one({"username": username.strip()})
     if not user or not user.get("security_answer_hash"):
         return False, "본인 확인 정보가 없는 계정이에요. 운영자에게 문의해주세요."
@@ -178,11 +189,13 @@ def admin_reset_password(user_id: str) -> str:
 # ================= 관리자 =================
 
 def _admin_usernames() -> set:
+    """secrets의 ADMIN_USERNAMES 값에 등록된 관리자 아이디 집합을 반환한다."""
     raw = st.secrets.get("ADMIN_USERNAMES", "")
     return {u.strip() for u in raw.split(",") if u.strip()}
 
 
 def is_admin(username: str) -> bool:
+    """해당 아이디가 관리자로 지정되어 있는지 여부를 반환한다."""
     return username in _admin_usernames()
 
 
@@ -198,11 +211,13 @@ def touch_presence(user_id: str, username: str, nickname: str):
 
 
 def get_active_user_count(minutes: int = ACTIVE_WINDOW_MINUTES) -> int:
+    """최근 N분 이내 활동(하트비트)이 감지된 접속자 수를 반환한다."""
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     return get_db().presence.count_documents({"last_seen": {"$gte": cutoff}})
 
 
 def get_active_users(minutes: int = ACTIVE_WINDOW_MINUTES) -> list:
+    """최근 N분 이내 접속 중인 사용자 목록을 반환한다."""
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     return list(
         get_db().presence.find({"last_seen": {"$gte": cutoff}}).sort("last_seen", DESCENDING)
@@ -217,6 +232,7 @@ def _clean_sets(sets: list) -> list:
 
 
 def has_log_data(sets: list, memo: str = "") -> bool:
+    """세트 기록이나 메모 중 실제로 저장할 값이 있는지 확인한다(빈 기록 저장 방지용)."""
     if memo and memo.strip():
         return True
     for s in sets:
@@ -226,6 +242,7 @@ def has_log_data(sets: list, memo: str = "") -> bool:
 
 
 def save_exercise_log(user_id: str, date_str: str, exercise_name: str, sets: list, memo: str = ""):
+    """해당 날짜·운동의 세트 기록과 메모를 저장한다(있으면 갱신, 없으면 새로 생성)."""
     db = get_db()
     if not has_log_data(sets, memo):
         db.logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
@@ -241,15 +258,18 @@ def save_exercise_log(user_id: str, date_str: str, exercise_name: str, sets: lis
 
 
 def get_log_for_date(user_id: str, date_str: str) -> dict:
+    """특정 날짜, 특정 운동의 기록 하나를 조회한다."""
     docs = get_db().logs.find({"user_id": user_id, "date": date_str})
     return {d["exercise_name"]: {"sets": d["sets"], "memo": d.get("memo", "")} for d in docs}
 
 
 def get_all_logs(user_id: str) -> list:
+    """해당 사용자의 모든 근력 운동(비유산소) 기록을 조회한다."""
     return list(get_db().logs.find({"user_id": user_id}).sort("date", DESCENDING))
 
 
 def delete_log(user_id: str, date_str: str, exercise_name: str):
+    """특정 날짜의 특정 운동 기록을 삭제한다."""
     get_db().logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
 
 
@@ -258,6 +278,7 @@ def delete_log(user_id: str, date_str: str, exercise_name: str):
 # "시간(분) + (있으면) 거리(km) + (선택) 칼로리 + 메모"라서 근력 로직을 그대로 못 쓴다.
 
 def has_cardio_log_data(duration_min, memo: str = "") -> bool:
+    """유산소 기록(시간·메모)에 실제로 저장할 값이 있는지 확인한다."""
     if memo and memo.strip():
         return True
     return duration_min not in (None, "")
@@ -302,6 +323,7 @@ def save_cardio_log(
     calories=None,
     memo: str = "",
 ):
+    """해당 날짜·유산소 운동의 시간/거리/칼로리 기록을 저장한다(있으면 갱신, 없으면 새로 생성)."""
     db = get_db()
     if not has_cardio_log_data(duration_min, memo):
         db.cardio_logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
@@ -323,6 +345,7 @@ def save_cardio_log(
 
 
 def get_cardio_log_for_date(user_id: str, date_str: str) -> dict:
+    """특정 날짜, 특정 유산소 운동의 기록 하나를 조회한다."""
     docs = get_db().cardio_logs.find({"user_id": user_id, "date": date_str})
     return {
         d["exercise_name"]: {
@@ -336,10 +359,12 @@ def get_cardio_log_for_date(user_id: str, date_str: str) -> dict:
 
 
 def get_all_cardio_logs(user_id: str) -> list:
+    """해당 사용자의 모든 유산소 운동 기록을 조회한다."""
     return list(get_db().cardio_logs.find({"user_id": user_id}).sort("date", DESCENDING))
 
 
 def delete_cardio_log(user_id: str, date_str: str, exercise_name: str):
+    """특정 날짜의 특정 유산소 운동 기록을 삭제한다."""
     get_db().cardio_logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
 
 
@@ -466,6 +491,7 @@ def get_my_exercise_rank(exercise_name: str, user_id: str) -> Optional[int]:
 
 
 def get_my_volume_rank(user_id: str) -> Optional[int]:
+    """전체 회원 중 내 총 볼륨(무게×횟수 합) 순위를 반환한다."""
     rows = get_volume_leaderboard(limit=100000)
     for i, r in enumerate(rows, start=1):
         if r.get("user_id") == user_id:
@@ -490,6 +516,7 @@ STATUS_OPTIONS = ["접수", "처리중", "완료"]
 
 
 def add_inquiry(user_id: str, nickname: str, category: str, content: str):
+    """새 문의를 등록한다."""
     get_db().inquiries.insert_one(
         {
             "user_id": user_id,
@@ -503,14 +530,17 @@ def add_inquiry(user_id: str, nickname: str, category: str, content: str):
 
 
 def get_inquiries(limit: int = 200) -> list:
+    """관리자 페이지에서 쓰는 전체 문의 목록을 조회한다."""
     return list(get_db().inquiries.find().sort("created_at", DESCENDING).limit(limit))
 
 
 def update_inquiry_status(inquiry_id, status: str):
+    """문의 처리 상태를 변경한다(접수 → 처리중 → 완료)."""
     get_db().inquiries.update_one({"_id": ObjectId(inquiry_id)}, {"$set": {"status": status}})
 
 
 def delete_inquiry(inquiry_id):
+    """문의를 삭제한다."""
     get_db().inquiries.delete_one({"_id": ObjectId(inquiry_id)})
 
 
@@ -547,6 +577,7 @@ def validate_sets(sets: list):
 # ================= 계정 설정 (닉네임/비밀번호 변경, 탈퇴) =================
 
 def change_nickname(user_id: str, new_nickname: str):
+    """닉네임을 변경한다(중복 확인 포함)."""
     new_nickname = new_nickname.strip()
     if not new_nickname:
         return False, "닉네임을 입력해주세요."
@@ -559,6 +590,7 @@ def change_nickname(user_id: str, new_nickname: str):
 
 
 def change_password(user_id: str, current_password: str, new_password: str):
+    """현재 비밀번호를 확인한 뒤 새 비밀번호로 변경한다."""
     if len(new_password) < 4:
         return False, "새 비밀번호는 4자 이상이어야 해요."
     user = get_user_by_id(user_id)
@@ -570,6 +602,7 @@ def change_password(user_id: str, current_password: str, new_password: str):
 
 
 def set_security_question(user_id: str, question: str, answer: str):
+    """비밀번호 찾기에 쓸 보안 질문과 답을 설정/변경한다."""
     if not question or not answer or not answer.strip():
         return False, "질문과 답변을 모두 입력해주세요."
     ans_salt, ans_hash = hash_password(answer.strip().lower())
@@ -587,6 +620,7 @@ def set_security_question(user_id: str, question: str, answer: str):
 
 
 def delete_own_account(user_id: str, password: str):
+    """본인 비밀번호를 확인한 뒤 회원 탈퇴를 처리한다(계정 및 관련 기록 삭제)."""
     user = get_user_by_id(user_id)
     if not user or not verify_password(password, user["salt"], user["pw_hash"]):
         return False, "비밀번호가 일치하지 않아요."
@@ -671,6 +705,7 @@ def get_volume_leaderboard(limit: int = 20) -> list:
 # ================= 전체 통계 (관리자 대시보드) =================
 
 def get_dashboard_stats() -> dict:
+    """관리자 대시보드용 전체 통계(가입자 수, 접속자 수, 기록 수 등)를 계산한다."""
     db = get_db()
     return {
         "total_users": db.users.count_documents({}),
@@ -874,14 +909,17 @@ def create_or_update_post(user_id: str, nickname: str, date_str: str, file_bytes
 
 
 def get_feed_posts(limit: int = 50) -> list:
+    """최근 인증샷 게시글 목록을 최신순으로 조회한다."""
     return list(get_db().posts.find().sort("created_at", DESCENDING).limit(limit))
 
 
 def get_post_by_user_date(user_id: str, date_str: str) -> Optional[dict]:
+    """특정 사용자가 특정 날짜에 올린 게시글을 조회한다."""
     return get_db().posts.find_one({"user_id": user_id, "date": date_str})
 
 
 def delete_post(post_id, user_id: str, is_admin: bool = False):
+    """게시글을 삭제한다(작성자 본인 또는 관리자만 가능)."""
     database = get_db()
     q = {"_id": ObjectId(post_id)}
     if not is_admin:
@@ -890,6 +928,7 @@ def delete_post(post_id, user_id: str, is_admin: bool = False):
 
 
 def add_comment(post_id, user_id: str, nickname: str, text: str):
+    """게시글에 댓글을 추가한다."""
     text = (text or "").strip()
     if not text:
         return
@@ -910,6 +949,7 @@ def add_comment(post_id, user_id: str, nickname: str, text: str):
 
 
 def delete_comment(post_id, comment_id, user_id: str, is_admin: bool = False):
+    """댓글을 삭제한다(작성자 본인 또는 관리자만 가능)."""
     database = get_db()
     post = database.posts.find_one({"_id": ObjectId(post_id)})
     if not post:

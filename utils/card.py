@@ -27,15 +27,18 @@ MAX_ROWS_SHOWN = 8
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
+    """지정한 경로의 폰트 파일을 주어진 크기로 불러온다."""
     return ImageFont.truetype(path, size)
 
 
 def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    """주어진 폰트 기준으로 텍스트를 그렸을 때의 픽셀 너비를 계산한다."""
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0]
 
 
 def _center_text(draw, cx, y, text, font, fill):
+    """텍스트를 기준 x좌표에 가운데 정렬로 그린다."""
     w = _text_w(draw, text, font)
     draw.text((cx - w / 2, y), text, font=font, fill=fill)
 
