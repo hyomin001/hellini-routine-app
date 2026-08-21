@@ -387,8 +387,25 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
         st.markdown(f"**{icon} {c['exercise_name']}** 수정 중")
 
         min_val, sec_val = split_duration(c.get("duration_min"))
+        label_cols_n = 3 if has_distance else 2
+        with st.container(key=f"evenrow_cardioeditlbl_{entry_id}"):
+            lc = st.columns(label_cols_n)
+            lc[0].markdown(
+                "<div style='font-size:11px; color:#9296A0; text-align:center; font-weight:600;'>⏱ 분</div>",
+                unsafe_allow_html=True,
+            )
+            lc[1].markdown(
+                "<div style='font-size:11px; color:#9296A0; text-align:center; font-weight:600;'>⏱ 초</div>",
+                unsafe_allow_html=True,
+            )
+            if has_distance:
+                lc[2].markdown(
+                    "<div style='font-size:11px; color:#9296A0; text-align:center; font-weight:600;'>📏 거리(km)</div>",
+                    unsafe_allow_html=True,
+                )
+
         with st.container(key=f"evenrow_cardioedit_{entry_id}"):
-            cols = st.columns(3 if has_distance else 2)
+            cols = st.columns(label_cols_n)
             new_min = cols[0].text_input(
                 "분", value=min_val, key=f"cedit_min_{entry_id}",
                 label_visibility="collapsed", placeholder="분",
@@ -401,7 +418,7 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
             if has_distance:
                 dist_val = cols[2].text_input(
                     "거리(km)", value=str(c.get("distance_km") or ""), key=f"cedit_dist_{entry_id}",
-                    label_visibility="collapsed", placeholder="거리(km)",
+                    label_visibility="collapsed", placeholder="예: 5.25",
                 )
 
         cal_val = st.text_input(

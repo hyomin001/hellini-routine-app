@@ -641,7 +641,7 @@ def render_cardio_today(user: dict, date_str: str):
         if pr:
             if ex["has_distance"]:
                 if pr.get("best_distance"):
-                    pr_bits.append(f"최장 {pr['best_distance']:g}km")
+                    pr_bits.append(f"최장 {pr['best_distance']:.2f}km")
                 if pr.get("best_pace_sec"):
                     pr_bits.append(f"최고 {format_pace(pr['best_pace_sec'])}")
             elif pr.get("best_duration"):
@@ -673,8 +673,25 @@ def render_cardio_today(user: dict, date_str: str):
             st.markdown("---")
             st.markdown("**유산소 기록**")
 
+            label_cols_n = 3 if ex["has_distance"] else 2
+            with st.container(key=f"evenrow_{base_key}_labels"):
+                lc = st.columns(label_cols_n)
+                lc[0].markdown(
+                    "<div style='font-size:11px; color:#9296A0; text-align:center; font-weight:600;'>⏱ 분</div>",
+                    unsafe_allow_html=True,
+                )
+                lc[1].markdown(
+                    "<div style='font-size:11px; color:#9296A0; text-align:center; font-weight:600;'>⏱ 초</div>",
+                    unsafe_allow_html=True,
+                )
+                if ex["has_distance"]:
+                    lc[2].markdown(
+                        "<div style='font-size:11px; color:#9296A0; text-align:center; font-weight:600;'>📏 거리(km)</div>",
+                        unsafe_allow_html=True,
+                    )
+
             with st.container(key=f"evenrow_{base_key}_inputs"):
-                cols = st.columns(3 if ex["has_distance"] else 2)
+                cols = st.columns(label_cols_n)
                 new_min = cols[0].text_input(
                     "분", value=min_val, key=f"{base_key}_min",
                     label_visibility="collapsed", placeholder="분",
@@ -687,7 +704,7 @@ def render_cardio_today(user: dict, date_str: str):
                 if ex["has_distance"]:
                     new_distance = cols[2].text_input(
                         "거리(km)", value=distance_val, key=f"{base_key}_dist",
-                        label_visibility="collapsed", placeholder="거리(km)",
+                        label_visibility="collapsed", placeholder="예: 5.25",
                     )
 
             if ex["has_distance"] and (new_min or new_sec) and new_distance:
@@ -743,7 +760,7 @@ def render_mypage(user: dict):
     if cardio_totals["total_distance_km"] > 0 or cardio_totals["total_duration_min"] > 0:
         with st.container(key="evenrow_mypage_cardio_stats"):
             d1, d2 = st.columns(2)
-            d1.metric("🏃 누적 거리", f"{cardio_totals['total_distance_km']:.1f}km")
+            d1.metric("🏃 누적 거리", f"{cardio_totals['total_distance_km']:.2f}km")
             d2.metric("⏱️ 누적 시간", f"{cardio_totals['total_duration_min']:.0f}분")
 
     ui.render_streak_heatmap(db.get_workout_dates(user["id"]))
@@ -784,7 +801,7 @@ def render_mypage(user: dict):
                 icon = ex_def.get("icon", "🏃")
                 row = {"운동": f"{icon} {name}"}
                 if ex_def.get("has_distance"):
-                    row["최장거리(km)"] = f"{rec['best_distance']:g}" if rec.get("best_distance") else "-"
+                    row["최장거리(km)"] = f"{rec['best_distance']:.2f}" if rec.get("best_distance") else "-"
                     row["최고페이스"] = format_pace(rec["best_pace_sec"]) if rec.get("best_pace_sec") else "-"
                 else:
                     row["최장시간"] = format_duration(rec["best_duration"]) if rec.get("best_duration") else "-"
