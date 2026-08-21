@@ -26,6 +26,7 @@ render_xxx() 함수를 골라 호출하는 방식(SPA처럼 동작)으로 화면
 """
 import base64
 import datetime as dt
+import random
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -35,7 +36,11 @@ from utils import ui
 from utils import card
 from utils.data import (
     PARTS,
+    EX_BY_NAME,
     exercises_for_part,
+    alt_exercises_for,
+    random_exercise_for_part,
+    get_tier,
     ALL_EXERCISE_NAMES,
     UPDATE_LOG,
     CARDIO_EXERCISES,
@@ -462,11 +467,109 @@ def render_topnav(user: dict, admin: bool) -> str:
     active = db.get_active_user_count()
     stats = db.get_user_stats(user["id"], today_kst().isoformat())
     streak_txt = f" · 🔥 연속 {stats['streak']}일" if stats["streak"] > 0 else ""
+    tier = get_tier(stats["streak"])
+    tier_txt = f" · {tier['icon']} {tier['name']}"
     admin_tag = " · 🛡️ 관리자" if admin else ""
-    st.caption(f"👋 {user['nickname']}님{admin_tag} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명{streak_txt}")
+    st.caption(f"👋 {user['nickname']}님{admin_tag}{tier_txt} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명{streak_txt}")
 
     st.divider()
     return current
+
+# ================= 오늘 뭐 할지 정하기 (퀵스타트) =================
+def render_quick_start(user: dict):
+    """운동 가는 길 / 웜업·스트레칭 중에 '오늘 뭐 하지' 고민을 풀어주는 칸.
+    1) 직접 원하는 운동만 골라서 '오늘의 운동'으로 좁혀보기
+    2) 부위만 고르면 그 부위 안에서 하나를 무작위로 추천 + 방법 설명
+    선택 결과는 st.session_state["quick_pick"]에 저장되고, 아래 부위 탭에서
+    '선택한 운동만 보기'를 켜면 그 운동들만 걸러서 보여준다."""
+    st.session_state.setdefault("quick_pick", [])
+    st.session_state.setdefault("quick_filter_on", False)
+
+    with st.expander("🎯 오늘 뭐 할지 아직 못 정했다면 (가는 길 / 웜업 중 추천)", expanded=False):
+        mode = st.radio(
+            "방법 선택", ["✅ 내가 직접 고르기", "🎲 부위 골라서 무작위 추천받기"],
+            key="quick_mode", horizontal=False, label_visibility="collapsed",
+        )
+
+        if mode == "✅ 내가 직접 고르기":
+            st.caption("오늘 할 운동만 체크하면, 아래 부위 탭에서 그 운동들만 골라서 보여줘요.")
+            picked = st.multiselect(
+                "오늘 할 운동", ALL_EXERCISE_NAMES,
+                default=st.session_state["quick_pick"], key="quick_multiselect",
+            )
+            with st.container(key="evenrow_quickpick_btns"):
+                c1, c2 = st.columns(2)
+                if c1.button("이 운동들로 오늘 루틴 만들기", key="quick_apply", use_container_width=True, type="primary"):
+                    st.session_state["quick_pick"] = picked
+                    st.session_state["quick_filter_on"] = True
+                    st.toast(f"{len(picked)}개 운동으로 오늘의 루틴을 만들었어요!", icon="🎯")
+                    st.rerun()
+                if c2.button("전체 다시 보기", key="quick_reset", use_container_width=True):
+                    st.session_state["quick_pick"] = []
+                    st.session_state["quick_filter_on"] = False
+                    st.rerun()
+        else:
+            st.caption("부위만 고르면 그 안에서 하나를 무작위로 뽑아서 방법까지 설명해드려요.")
+            part_labels = {f"{p['label']} · {p['part']}": p["key"] for p in PARTS}
+            picked_label = st.selectbox("부위 선택", list(part_labels.keys()), key="quick_part_select")
+            part_key = part_labels[picked_label]
+
+            if st.button("🎲 랜덤 추천받기", key="quick_recommend_btn", use_container_width=True):
+                rec = random_exercise_for_part(part_key)
+                st.session_state["quick_recommend"] = rec["name"] if rec else None
+                st.rerun()
+
+            rec_name = st.session_state.get("quick_recommend")
+            rec_ex = EX_BY_NAME.get(rec_name) if rec_name else None
+            if rec_ex:
+                color = PART_COLORS.get(rec_ex["part"], "#FFC834")
+                st.markdown(
+                    f"<div style='background:#1B1D22; border:1px solid {color}; border-radius:12px; "
+                    f"padding:12px; margin-top:8px;'>"
+                    f"<div class='part-badge' style='background:{color};'>오늘의 추천</div>"
+                    f"<div style='font-size:16px; font-weight:800; color:#F2F1EC;'>{rec_ex['name']}</div>"
+                    f"<div class='equip-line'>🎯 {rec_ex['sets']}세트 · {rec_ex['reps']}</div>"
+                    f"<div class='equip-line'>🛠️ {rec_ex['equip']}</div>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                if rec_ex.get("howto"):
+                    steps_md = "\n".join(f"{i+1}. {s}" for i, s in enumerate(rec_ex["howto"]))
+                    st.markdown(steps_md)
+                if rec_ex.get("caution"):
+                    st.markdown(
+                        f"<div class='caution-box'>⚠️ <b>주의사항</b><br>{rec_ex['caution']}</div>",
+                        unsafe_allow_html=True,
+                    )
+                if rec_ex.get("tip"):
+                    st.markdown(
+                        f"<div class='tip-box'>💡 <b>팁</b><br>{rec_ex['tip']}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with st.container(key="evenrow_quickrec_btns"):
+                    rc1, rc2 = st.columns(2)
+                    if rc1.button("🔁 다른 운동 추천", key="quick_recommend_again", use_container_width=True):
+                        rec = random_exercise_for_part(part_key)
+                        st.session_state["quick_recommend"] = rec["name"] if rec else None
+                        st.rerun()
+                    if rc2.button("➕ 오늘 운동에 추가", key="quick_recommend_add", use_container_width=True, type="primary"):
+                        if rec_ex["name"] not in st.session_state["quick_pick"]:
+                            st.session_state["quick_pick"] = st.session_state["quick_pick"] + [rec_ex["name"]]
+                        st.session_state["quick_filter_on"] = True
+                        st.toast(f"{rec_ex['name']}을(를) 오늘의 루틴에 추가했어요!", icon="✅")
+                        st.rerun()
+
+    if st.session_state["quick_pick"]:
+        names_txt = ", ".join(st.session_state["quick_pick"])
+        st.markdown(
+            f"<div class='tip-box'>🎯 <b>오늘의 선택 운동</b> ({len(st.session_state['quick_pick'])}개)<br>{names_txt}</div>",
+            unsafe_allow_html=True,
+        )
+        st.session_state["quick_filter_on"] = st.toggle(
+            "✅ 선택한 운동만 보기 (끄면 부위 전체 다시 보여요)",
+            value=st.session_state["quick_filter_on"], key="quick_filter_toggle",
+        )
+
 
 # ================= 오늘의 루틴 =================
 def render_today(user: dict):
@@ -504,8 +607,9 @@ def render_today(user: dict):
         unsafe_allow_html=True,
     )
 
-    st.caption("⏱ 세트 사이 휴식 타이머 (운동 하나 저장하고 다시 열어도 이어서 흘러가요)")
-    render_rest_timer()
+    st.caption("⏱ 휴식 타이머는 이제 각 운동의 '세트 기록' 칸 바로 위에 있어요 (스크롤해서 위로 안 올라와도 돼요)")
+
+    render_quick_start(user)
 
     with st.expander(f"🔥 {date_str} 인증 현황 (누가 오늘 운동했나 보기)"):
         checkins = db.get_today_checkins(date_str, len(ALL_EXERCISE_NAMES))
@@ -527,9 +631,16 @@ def render_today(user: dict):
     tab_labels = part_labels + ["🏃 유산소"]
     tab_objs = st.tabs(tab_labels)
 
+    quick_pick = st.session_state.get("quick_pick", [])
+    quick_filter_on = st.session_state.get("quick_filter_on", False) and bool(quick_pick)
+
     for tab, part in zip(tab_objs[:-1], PARTS):
         with tab:
-            exercises = exercises_for_part(part["key"])
+            all_exercises = exercises_for_part(part["key"])
+            exercises = (
+                [e for e in all_exercises if e["name"] in quick_pick]
+                if quick_filter_on else all_exercises
+            )
             done_count = 0
 
             color = PART_COLORS.get(part["key"], "#FFC834")
@@ -537,6 +648,11 @@ def render_today(user: dict):
                 f"<span class='part-badge' style='background:{color};'>{part['label']} · {part['part']}</span>",
                 unsafe_allow_html=True,
             )
+            if quick_filter_on:
+                st.caption("🎯 오늘 선택한 운동만 보여주고 있어요. (위 '오늘 뭐 할지 정하기'에서 끌 수 있어요)")
+            if quick_filter_on and not exercises:
+                st.info("이 부위에서 선택한 운동이 없어요.")
+                continue
 
             for ex in exercises:
                 existing = log_for_date.get(ex["name"])
@@ -547,7 +663,7 @@ def render_today(user: dict):
                 if is_complete:
                     done_count += 1
 
-            chip_class = "progress-chip done" if done_count == len(exercises) else "progress-chip"
+            chip_class = "progress-chip done" if exercises and done_count == len(exercises) else "progress-chip"
             st.markdown(
                 f"<div style='text-align:right; margin-bottom:10px;'>"
                 f"<span class='{chip_class}'>{done_count}/{len(exercises)} 완료</span></div>",
@@ -557,24 +673,45 @@ def render_today(user: dict):
             for ex in exercises:
                 base_key = f"{date_str}_{part['key']}_{ex['name']}"
 
-                existing = log_for_date.get(ex["name"])
-                sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(ex["sets"])]
+                # ---- 대체 운동: 기구 자리가 없을 때 같은 부위 다른 운동으로 바꿔서 기록 ----
+                alt_list = alt_exercises_for(ex["name"])
+                sub_options = [ex["name"]] + [a["name"] for a in alt_list]
+                sub_key = f"{base_key}_sub"
+                chosen_name = st.session_state.get(sub_key, ex["name"])
+                if chosen_name not in sub_options:
+                    chosen_name = ex["name"]
+                active_ex = EX_BY_NAME.get(chosen_name, ex)
+                is_substituted = chosen_name != ex["name"]
+
+                existing = log_for_date.get(active_ex["name"])
+                sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(active_ex["sets"])]
                 memo_state = existing["memo"] if existing else ""
                 is_complete = existing is not None and all(
                     s.get("w") not in (None, "") and s.get("r") not in (None, "") for s in sets_state
                 )
 
-                pr = pr_map.get(ex["name"])
+                pr = pr_map.get(active_ex["name"])
                 pr_txt = f" · 🏅 {pr['weight']:g}kg × {pr['reps']}회" if pr else ""
+                sub_tag = " 🔄대체" if is_substituted else ""
 
-                with st.expander(f"{'✅ ' if is_complete else ''}{ex['name']}{pr_txt}"):
+                with st.expander(f"{'✅ ' if is_complete else ''}{active_ex['name']}{sub_tag}{pr_txt}"):
+                    if is_substituted:
+                        st.caption(f"원래 운동: {ex['name']} → 지금은 대체 운동으로 기록해요.")
+
+                    if len(sub_options) > 1:
+                        st.selectbox(
+                            "🔄 기구 자리가 없나요? 같은 부위 운동으로 대체",
+                            sub_options, key=sub_key,
+                            index=sub_options.index(chosen_name),
+                        )
+
                     try:
-                        st.image(ex["img_path"], width=220)
+                        st.image(active_ex["img_path"], width=220)
                     except Exception:
                         pass
                     st.markdown(
-                        f"<div class='equip-line'>🎯 {ex['sets']}세트 · {ex['reps']}</div>"
-                        f"<div class='equip-line'>🛠️ {ex['equip']}</div>",
+                        f"<div class='equip-line'>🎯 {active_ex['sets']}세트 · {active_ex['reps']}</div>"
+                        f"<div class='equip-line'>🛠️ {active_ex['equip']}</div>",
                         unsafe_allow_html=True,
                     )
                     if pr:
@@ -583,28 +720,30 @@ def render_today(user: dict):
                             unsafe_allow_html=True,
                         )
 
-                    if ex.get("howto"):
+                    if active_ex.get("howto"):
                         with st.container():
                             st.markdown("**동작 방법**")
-                            steps_md = "\n".join(f"{i+1}. {s}" for i, s in enumerate(ex["howto"]))
+                            steps_md = "\n".join(f"{i+1}. {s}" for i, s in enumerate(active_ex["howto"]))
                             st.markdown(steps_md)
 
-                    if ex.get("caution"):
+                    if active_ex.get("caution"):
                         st.markdown(
-                            f"<div class='caution-box'>⚠️ <b>주의사항</b><br>{ex['caution']}</div>",
+                            f"<div class='caution-box'>⚠️ <b>주의사항</b><br>{active_ex['caution']}</div>",
                             unsafe_allow_html=True,
                         )
-                    if ex.get("tip"):
+                    if active_ex.get("tip"):
                         st.markdown(
-                            f"<div class='tip-box'>💡 <b>팁</b><br>{ex['tip']}</div>",
+                            f"<div class='tip-box'>💡 <b>팁</b><br>{active_ex['tip']}</div>",
                             unsafe_allow_html=True,
                         )
 
                     st.markdown("---")
                     st.markdown("**세트 기록**")
+                    st.caption("⏱ 세트 사이 휴식 타이머 (바로 여기서 눌러요, 위로 스크롤 안 해도 돼요)")
+                    render_rest_timer()
 
                     new_sets = []
-                    for i in range(ex["sets"]):
+                    for i in range(active_ex["sets"]):
                         s = sets_state[i] if i < len(sets_state) else {"w": "", "r": ""}
                         with st.container(key=f"setrow_{base_key}_{i}"):
                             c1, c2, c3 = st.columns([0.9, 1.5, 1.5])
@@ -629,8 +768,8 @@ def render_today(user: dict):
                         if not ok:
                             st.error(err)
                         else:
-                            db.save_exercise_log(user["id"], date_str, ex["name"], new_sets, memo_val)
-                            st.toast(f"{ex['name']} 저장 완료!", icon="✅")
+                            db.save_exercise_log(user["id"], date_str, active_ex["name"], new_sets, memo_val)
+                            st.toast(f"{active_ex['name']} 저장 완료!", icon="✅")
                             st.rerun()
 
     with tab_objs[-1]:
@@ -787,6 +926,8 @@ def render_mypage(user: dict):
         c1.metric("🔥 연속 기록", f"{stats['streak']}일")
         c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
         c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
+
+    ui.render_tier_card(stats["streak"])
 
     cardio_totals = db.get_cardio_totals(user["id"])
     if cardio_totals["total_distance_km"] > 0 or cardio_totals["total_duration_min"] > 0:

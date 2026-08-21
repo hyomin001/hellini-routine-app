@@ -23,7 +23,7 @@ import io
 import streamlit as st
 
 from utils import db
-from utils.data import CARDIO_EX_BY_NAME, parse_duration, split_duration, format_duration
+from utils.data import CARDIO_EX_BY_NAME, parse_duration, split_duration, format_duration, get_tier
 
 BASE_CSS = """
 <style>
@@ -526,6 +526,35 @@ def render_streak_heatmap(workout_dates: set):
 
     st.markdown(grid, unsafe_allow_html=True)
     st.caption(f"📅 {month}월 운동 달력이에요. 민트색 칸이 그날 기록을 남긴 날, 노란 테두리는 오늘이에요.")
+
+
+def render_tier_card(streak: int):
+    """연속 기록일(streak) 기준 헬린이 등급 카드. 0일은 흰색, 1~10일/11~30일/... 1년 이상까지
+    구간별로 색이 달라지고, 다음 등급까지 며칠 남았는지도 같이 보여준다."""
+    tier = get_tier(streak)
+    if tier["max"] is None:
+        range_txt = f"{tier['min']}일 이상"
+    elif tier["min"] == tier["max"]:
+        range_txt = f"{tier['min']}일"
+    else:
+        range_txt = f"{tier['min']}~{tier['max']}일"
+
+    st.markdown(
+        f"<div style='background:{tier['color']}; border-radius:14px; padding:16px; "
+        f"margin:10px 0; text-align:center;'>"
+        f"<div style='font-size:30px; line-height:1;'>{tier['icon']}</div>"
+        f"<div style='font-size:17px; font-weight:800; color:{tier['text']}; margin-top:4px;'>"
+        f"{tier['name']} 등급</div>"
+        f"<div style='font-size:12px; color:{tier['text']}; opacity:0.85; margin-top:2px;'>"
+        f"🔥 연속 {streak}일 달성 · {range_txt} 구간</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    if tier["next"]:
+        need = max(0, tier["next"]["min"] - streak)
+        st.caption(f"다음 등급 {tier['next']['icon']} **{tier['next']['name']}**까지 {need}일 남았어요.")
+    else:
+        st.caption("🎉 최고 등급이에요! 꾸준함을 계속 이어가보세요.")
 
 
 def render_badges(badges: list):

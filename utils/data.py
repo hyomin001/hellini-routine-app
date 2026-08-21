@@ -6,6 +6,7 @@
 """
 import json
 import os
+import random as _random
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _ASSETS_DIR = os.path.join(os.path.dirname(_DIR), "assets", "exercises")
@@ -34,6 +35,61 @@ ALL_EXERCISE_NAMES = list(EX_BY_NAME.keys())
 def exercises_for_part(part_key: str):
     """특정 부위(PART) 키에 해당하는 운동 목록을 반환한다."""
     return [e for e in EX if e["part"] == part_key]
+
+
+# ================= 대체 운동 (기구가 없을 때) =================
+
+def alt_exercises_for(exercise_name: str):
+    """주어진 운동과 같은 부위(part)에 속한 '다른' 운동들을 순서 그대로 반환한다.
+    (같은 운동이 여러 부위에 걸쳐 있으면 그 부위들을 모두 고려)
+    기구 사용중이라 자리가 없을 때 같은 부위 운동으로 바로 대체할 수 있게 하기 위한 목록."""
+    parts = {e["part"] for e in EX if e["name"] == exercise_name}
+    seen = {exercise_name}
+    out = []
+    for e in EX:
+        if e["part"] in parts and e["name"] not in seen:
+            out.append(e)
+            seen.add(e["name"])
+    return out
+
+
+def random_exercise_for_part(part_key: str):
+    """해당 부위 운동 중 하나를 무작위로 추천한다 (가는 길/웜업 중 '오늘 뭐하지' 고민 해결용)."""
+    pool = exercises_for_part(part_key)
+    if not pool:
+        return None
+    return _random.choice(pool)
+
+
+# ================= 헬린이 등급제 (연속 기록일 기반) =================
+# 연속 기록(스트릭) 일수 구간별로 등급을 나눈다. 0일은 흰색, 이후 구간마다 색이 바뀌며
+# 1년(365일) 이상은 최고 등급.
+TIER_DEFS = [
+    {"id": "t0", "min": 0, "max": 0, "name": "시작 전", "icon": "⚪", "color": "#F2F1EC", "text": "#121316"},
+    {"id": "t1", "min": 1, "max": 10, "name": "새싹", "icon": "🌱", "color": "#8BD46E", "text": "#121316"},
+    {"id": "t2", "min": 11, "max": 30, "name": "성장중", "icon": "💧", "color": "#5AA9FF", "text": "#121316"},
+    {"id": "t3", "min": 31, "max": 100, "name": "숙련자", "icon": "🔥", "color": "#B15AFF", "text": "#F2F1EC"},
+    {"id": "t4", "min": 101, "max": 200, "name": "베테랑", "icon": "⚡", "color": "#FF9F5A", "text": "#121316"},
+    {"id": "t5", "min": 201, "max": 365, "name": "마스터", "icon": "👑", "color": "#FFC834", "text": "#121316"},
+    {
+        "id": "t6", "min": 366, "max": None, "name": "레전드", "icon": "🏆",
+        "color": "linear-gradient(90deg,#FF5A9F,#FFC834,#5AA9FF)", "text": "#121316",
+    },
+]
+
+
+def get_tier(streak_days: int) -> dict:
+    """연속 기록일(streak)에 해당하는 등급 정보를 반환한다.
+    반환값에 'next'(다음 등급, 없으면 None)를 함께 담아서 진행률 표시에 바로 쓸 수 있게 한다."""
+    streak_days = max(0, int(streak_days or 0))
+    tier, idx = TIER_DEFS[0], 0
+    for i, t in enumerate(TIER_DEFS):
+        if streak_days >= t["min"]:
+            tier, idx = t, i
+        else:
+            break
+    nxt = TIER_DEFS[idx + 1] if idx + 1 < len(TIER_DEFS) else None
+    return {**tier, "next": nxt}
 
 
 # ================= 유산소 =================
