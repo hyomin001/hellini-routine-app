@@ -467,7 +467,7 @@ def render_topnav(user: dict, admin: bool) -> str:
     active = db.get_active_user_count()
     stats = db.get_user_stats(user["id"], today_kst().isoformat())
     streak_txt = f" · 🔥 연속 {stats['streak']}일" if stats["streak"] > 0 else ""
-    tier = get_tier(stats["streak"])
+    tier = get_tier(stats["workout_days"])
     tier_txt = f" · {tier['icon']} {tier['name']}"
     admin_tag = " · 🛡️ 관리자" if admin else ""
     st.caption(f"👋 {user['nickname']}님{admin_tag}{tier_txt} · 👥 총 가입자 {total}명 · 🟢 현재 접속 {active}명{streak_txt}")
@@ -927,7 +927,7 @@ def render_mypage(user: dict):
         c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
         c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
 
-    ui.render_tier_card(stats["streak"])
+    ui.render_tier_card(stats["workout_days"])
 
     cardio_totals = db.get_cardio_totals(user["id"])
     if cardio_totals["total_distance_km"] > 0 or cardio_totals["total_duration_min"] > 0:
