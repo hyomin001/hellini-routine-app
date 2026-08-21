@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 from utils import db
 from utils import ui
 from utils import card
-from utils.data import DAYS, exercises_for_day, ALL_EXERCISE_NAMES
+from utils.data import PARTS, exercises_for_part, ALL_EXERCISE_NAMES, UPDATE_LOG
 
 # Streamlit Cloud 서버는 UTC 기준으로 동작하므로 dt.date.today()를 그대로 쓰면
 # 한국시간(UTC+9) 새벽 0~9시 사이에는 아직 "어제" 날짜가 반환된다.
@@ -33,11 +33,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DAY_COLORS = {
-    "DAY1": "#FF9F5A",
-    "DAY2": "#5AA9FF",
-    "DAY3": "#5AFF9F",
-    "DAY4": "#FF5A9F",
+PART_COLORS = {
+    "PART1": "#FF9F5A",
+    "PART2": "#5AA9FF",
+    "PART3": "#5AFF9F",
+    "PART4": "#FF5A9F",
 }
 
 
@@ -227,7 +227,7 @@ st.markdown(
         border-color: #4ECDC4;
     }
 
-    .day-badge {
+    .part-badge {
         display:inline-block; padding:2px 10px; border-radius:999px;
         font-size:11px; font-weight:700; letter-spacing:0.03em;
         color:#121316; margin-bottom:6px;
@@ -254,7 +254,7 @@ st.markdown(
     /* ===== 이 페이지 전용 요소들의 모바일 폰트/여백 축소 ===== */
     @media (max-width: 480px) {
         .progress-chip { font-size: 11px; padding: 3px 9px; }
-        .day-badge { font-size: 10.5px; padding: 2px 8px; }
+        .part-badge { font-size: 10.5px; padding: 2px 8px; }
         .exercise-thumb { max-width: 100%; }
     }
     /* st.metric (연속기록/총기록일/총볼륨, 관리자 대시보드 등) 좁은 화면에서 글자가
@@ -445,8 +445,8 @@ def render_today(user: dict):
 
     # ---- 이 날짜의 전체(부위 1~4 합산) 진행 요약 ----
     total_all, done_all = 0, 0
-    for day in DAYS:
-        for ex in exercises_for_day(day["key"]):
+    for part in PARTS:
+        for ex in exercises_for_part(part["key"]):
             total_all += 1
             existing = log_for_date.get(ex["name"])
             sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(ex["sets"])]
@@ -473,17 +473,24 @@ def render_today(user: dict):
                 mine = " 👈 나" if c["nickname"] == user["nickname"] else ""
                 st.markdown(f"💪 **{c['nickname']}**{mine} · {c['done_count']}종목 기록")
 
-    day_labels = [f"{d['label']} · {d['part']}" for d in DAYS]
-    tab_objs = st.tabs(day_labels)
+    with st.expander("🆕 업데이트 현황 (뭐가 바뀌었는지 보기)"):
+        for log in UPDATE_LOG:
+            st.markdown(f"**{log['date']}**")
+            for item in log["items"]:
+                st.markdown(f"- {item}")
+            st.markdown("")
 
-    for tab, day in zip(tab_objs, DAYS):
+    part_labels = [f"{p['label']} · {p['part']}" for p in PARTS]
+    tab_objs = st.tabs(part_labels)
+
+    for tab, part in zip(tab_objs, PARTS):
         with tab:
-            exercises = exercises_for_day(day["key"])
+            exercises = exercises_for_part(part["key"])
             done_count = 0
 
-            color = DAY_COLORS.get(day["key"], "#FFC834")
+            color = PART_COLORS.get(part["key"], "#FFC834")
             st.markdown(
-                f"<span class='day-badge' style='background:{color};'>{day['label']} · {day['part']}</span>",
+                f"<span class='part-badge' style='background:{color};'>{part['label']} · {part['part']}</span>",
                 unsafe_allow_html=True,
             )
 
@@ -504,7 +511,7 @@ def render_today(user: dict):
             )
 
             for ex in exercises:
-                base_key = f"{date_str}_{day['key']}_{ex['name']}"
+                base_key = f"{date_str}_{part['key']}_{ex['name']}"
 
                 existing = log_for_date.get(ex["name"])
                 sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(ex["sets"])]

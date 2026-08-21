@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 기존 '헬린이 루틴' HTML 웹앱의 운동 데이터를 그대로 이식 (사진, 방법, 주의사항, 팁 포함).
-같은 운동(name)이 여러 요일에 나올 수 있는데, 이 경우 하나의 동일한 운동으로 취급해서
+같은 운동(name)이 여러 부위에 나올 수 있는데, 이 경우 하나의 동일한 운동으로 취급해서
 개인 기록(PR)과 랭킹을 name 기준으로 합산한다 (기존 HTML의 EX_BY_NAME 방식과 동일).
 """
 import json
@@ -17,21 +17,43 @@ with open(os.path.join(_DIR, "exercises_data.json"), "r", encoding="utf-8") as f
 for _e in EX:
     _e["img_path"] = os.path.join(_ASSETS_DIR, f"{_e['img']}.jpg")
 
-DAYS = [
-    # key는 DB에 이미 저장된 기록과의 호환을 위해 "DAY1"~"DAY4" 형태를 그대로 유지하고,
-    # 화면에 보이는 label만 "DAY"(요일 느낌) 대신 부위 중심 이름으로 바꾼다.
-    {"key": "DAY1", "label": "부위 1", "part": "가슴·삼두·어깨"},
-    {"key": "DAY2", "label": "부위 2", "part": "등·이두·후면어깨"},
-    {"key": "DAY3", "label": "부위 3", "part": "하체·엉덩이·복근"},
-    {"key": "DAY4", "label": "부위 4", "part": "어깨·팔"},
+PARTS = [
+    {"key": "PART1", "label": "부위 1", "part": "가슴·삼두·어깨"},
+    {"key": "PART2", "label": "부위 2", "part": "등·이두·후면어깨"},
+    {"key": "PART3", "label": "부위 3", "part": "하체·엉덩이·복근"},
+    {"key": "PART4", "label": "부위 4", "part": "어깨·팔"},
 ]
 
 EX_BY_NAME = {}
 for _e in EX:
-    EX_BY_NAME.setdefault(_e["name"], _e)  # 첫 등장 요일 기준 sets/reps/equip 대표값
+    EX_BY_NAME.setdefault(_e["name"], _e)  # 첫 등장 부위 기준 sets/reps/equip 대표값
 
 ALL_EXERCISE_NAMES = list(EX_BY_NAME.keys())
 
 
-def exercises_for_day(day_key: str):
-    return [e for e in EX if e["day"] == day_key]
+def exercises_for_part(part_key: str):
+    return [e for e in EX if e["part"] == part_key]
+
+
+# 앱 업데이트 내역 (마이페이지 아니라, '오늘' 화면의 '업데이트 현황'에서 유저들에게 보여준다).
+# 새 업데이트가 생기면 리스트 맨 위에 추가하면 된다 (최신순으로 그대로 렌더링됨).
+UPDATE_LOG = [
+    {
+        "date": "2026-08-21",
+        "items": [
+            "운동 종목 10개 추가: 팔굽혀펴기 · 플랫 벤치 프레스 · 딥스 · 펙 덱 플라이 · 풀업(턱걸이) · "
+            "데드리프트 · 윗몸일으키기 · 플랭크 · 워킹 런지 · 오버헤드 트라이셉스 익스텐션",
+            "'DAY1~4' 표현을 코드 곳곳에서 전부 '부위 1~4'로 정리",
+            "'오늘' 화면에 업데이트 현황 칸 추가 (지금 보고 계신 이 칸이에요!)",
+        ],
+    },
+    {
+        "date": "2026-08-20",
+        "items": [
+            "마이페이지 연속 기록을 깃허브 잔디밭 스타일 → 실제 이번 달 달력 형태로 교체",
+            "모바일 좁은 화면에서 상단 메뉴 버튼 · 마이페이지 통계 · 뱃지 · 댓글 버튼이 화면 밖으로 "
+            "넘어가던 문제 수정",
+        ],
+    },
+]
+
