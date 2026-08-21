@@ -23,6 +23,7 @@ import io
 import streamlit as st
 
 from utils import db
+from utils.data import CARDIO_EX_BY_NAME
 
 BASE_CSS = """
 <style>
@@ -248,10 +249,11 @@ def render_account_settings(user: dict):
     st.markdown("---")
     st.markdown("**⬇️ 내 기록 CSV 다운로드**")
     logs = db.get_all_logs(user["id"])
-    if logs:
+    cardio_logs = db.get_all_cardio_logs(user["id"])
+    if logs or cardio_logs:
         st.download_button(
             "내 운동 기록 CSV 받기",
-            data=build_logs_csv(logs),
+            data=build_logs_csv(logs, cardio_logs),
             file_name=f"헬린이루틴_{user['nickname']}_기록.csv",
             mime="text/csv",
             use_container_width=True,
@@ -354,19 +356,98 @@ def render_log_entry_editable(user: dict, e: dict):
     st.markdown("---")
 
 
-def build_logs_csv(logs: list) -> str:
-    """기록 리스트를 CSV 문자열로 변환 (엑셀에서 바로 열리도록 UTF-8 BOM 포함)."""
+def render_cardio_log_entry_editable(user: dict, c: dict):
+    """마이페이지 '기록 히스토리'의 유산소 기록 한 줄. 근력과 동일하게 그 자리에서 수정/삭제 가능."""
+    entry_id = str(c["_id"])
+    edit_key = f"editing_cardio_{entry_id}"
+    editing = st.session_state.get(edit_key, False)
+    ex_def = CARDIO_EX_BY_NAME.get(c["exercise_name"], {})
+    has_distance = ex_def.get("has_distance", False)
+    icon = ex_def.get("icon", "🏃")
+
+    if not editing:
+        bits = [f"{c.get('duration_min', '')}분"]
+        if c.get("distance_km") not in (None, ""):
+            bits.append(f"{c['distance_km']}km")
+        if c.get("calories") not in (None, ""):
+            bits.append(f"{c['calories']}kcal")
+        st.markdown(f"**{icon} {c['exercise_name']}**  \n{' / '.join(bits)}")
+        if c.get("memo"):
+            st.caption(f"메모: {c['memo']}")
+
+        with st.container(key=f"evenrow_cardiobtns_{entry_id}"):
+            b1, b2 = st.columns(2)
+            if b1.button("✏️ 수정", key=f"cedit_{entry_id}", use_container_width=True):
+                st.session_state[edit_key] = True
+                st.rerun()
+            if b2.button("🗑️ 삭제", key=f"cdel_{entry_id}", use_container_width=True):
+                db.delete_cardio_log(user["id"], c["date"], c["exercise_name"])
+                st.rerun()
+    else:
+        st.markdown(f"**{icon} {c['exercise_name']}** 수정 중")
+
+        with st.container(key=f"evenrow_cardioedit_{entry_id}"):
+            cols = st.columns(2 if has_distance else 1)
+            dur_val = cols[0].text_input(
+                "시간(분)", value=str(c.get("duration_min") or ""), key=f"cedit_dur_{entry_id}",
+                label_visibility="collapsed", placeholder="시간(분)",
+            )
+            dist_val = ""
+            if has_distance:
+                dist_val = cols[1].text_input(
+                    "거리(km)", value=str(c.get("distance_km") or ""), key=f"cedit_dist_{entry_id}",
+                    label_visibility="collapsed", placeholder="거리(km)",
+                )
+
+        cal_val = st.text_input(
+            "칼로리(선택)", value=str(c.get("calories") or ""), key=f"cedit_cal_{entry_id}",
+            placeholder="칼로리(선택, kcal)",
+        )
+        memo_val = st.text_input("메모", value=c.get("memo", ""), key=f"cedit_memo_{entry_id}")
+
+        with st.container(key=f"evenrow_cardioeditbtns_{entry_id}"):
+            b1, b2 = st.columns(2)
+            if b1.button("💾 저장", key=f"csave_{entry_id}", use_container_width=True, type="primary"):
+                ok, err = db.validate_cardio_log(dur_val, dist_val if has_distance else None, cal_val)
+                if not ok:
+                    st.error(err)
+                else:
+                    db.save_cardio_log(
+                        user["id"], c["date"], c["exercise_name"],
+                        dur_val, dist_val if has_distance else None, cal_val, memo_val,
+                    )
+                    st.session_state[edit_key] = False
+                    st.toast(f"{c['exercise_name']} 수정 완료!", icon="✅")
+                    st.rerun()
+            if b2.button("취소", key=f"ccancel_{entry_id}", use_container_width=True):
+                st.session_state[edit_key] = False
+                st.rerun()
+
+    st.markdown("---")
+
+
+def build_logs_csv(logs: list, cardio_logs: list = None) -> str:
+    """기록 리스트를 CSV 문자열로 변환 (엑셀에서 바로 열리도록 UTF-8 BOM 포함).
+    근력/유산소 기록을 한 파일에 같이 담되, '종류' 컬럼으로 구분한다."""
     buf = io.StringIO()
     buf.write("\ufeff")
     writer = csv.writer(buf)
-    writer.writerow(["날짜", "운동", "세트", "무게(kg)", "횟수", "메모"])
+    writer.writerow(["날짜", "종류", "운동", "세트/시간(분)", "무게(kg)/거리(km)", "횟수/칼로리(kcal)", "메모"])
     for d in logs:
         valid = [s for s in d["sets"] if s.get("w") not in (None, "") and s.get("r") not in (None, "")]
         if not valid:
-            writer.writerow([d["date"], d["exercise_name"], "", "", "", d.get("memo", "")])
+            writer.writerow([d["date"], "근력", d["exercise_name"], "", "", "", d.get("memo", "")])
             continue
         for i, s in enumerate(valid, start=1):
-            writer.writerow([d["date"], d["exercise_name"], i, s.get("w", ""), s.get("r", ""), d.get("memo", "") if i == 1 else ""])
+            writer.writerow([
+                d["date"], "근력", d["exercise_name"], i, s.get("w", ""), s.get("r", ""),
+                d.get("memo", "") if i == 1 else "",
+            ])
+    for d in cardio_logs or []:
+        writer.writerow([
+            d["date"], "유산소", d["exercise_name"], d.get("duration_min", ""),
+            d.get("distance_km", "") or "", d.get("calories", "") or "", d.get("memo", ""),
+        ])
     return buf.getvalue()
 
 
@@ -451,20 +532,26 @@ def render_history_tab(user: dict):
     어느 경로로 들어오든 버튼 크기/줄바꿈이 항상 같게 맞춘다.
     """
     logs = db.get_all_logs(user["id"])
-    if not logs:
+    cardio_logs = db.get_all_cardio_logs(user["id"])
+    if not logs and not cardio_logs:
         st.info("아직 기록이 없어요.")
         return
 
     by_date = {}
     for d in logs:
-        by_date.setdefault(d["date"], []).append(d)
+        by_date.setdefault(d["date"], {"strength": [], "cardio": []})["strength"].append(d)
+    for d in cardio_logs:
+        by_date.setdefault(d["date"], {"strength": [], "cardio": []})["cardio"].append(d)
 
     for date_str in sorted(by_date.keys(), reverse=True):
         entries = by_date[date_str]
-        with st.expander(f"{date_str} · 운동 {len(entries)}개"):
+        total_count = len(entries["strength"]) + len(entries["cardio"])
+        with st.expander(f"{date_str} · 운동 {total_count}개"):
             render_card_download_button(user, date_str)
-            for e in entries:
+            for e in entries["strength"]:
                 render_log_entry_editable(user, e)
+            for c in entries["cardio"]:
+                render_cardio_log_entry_editable(user, c)
 
 
 def render_card_download_button(user: dict, date_str: str):

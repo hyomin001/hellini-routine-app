@@ -8,7 +8,16 @@ import streamlit.components.v1 as components
 from utils import db
 from utils import ui
 from utils import card
-from utils.data import PARTS, exercises_for_part, ALL_EXERCISE_NAMES, UPDATE_LOG
+from utils.data import (
+    PARTS,
+    exercises_for_part,
+    ALL_EXERCISE_NAMES,
+    UPDATE_LOG,
+    CARDIO_EXERCISES,
+    CARDIO_EX_BY_NAME,
+    CARDIO_NOTE,
+    format_pace,
+)
 
 # Streamlit Cloud 서버는 UTC 기준으로 동작하므로 dt.date.today()를 그대로 쓰면
 # 한국시간(UTC+9) 새벽 0~9시 사이에는 아직 "어제" 날짜가 반환된다.
@@ -39,6 +48,7 @@ PART_COLORS = {
     "PART3": "#5AFF9F",
     "PART4": "#FF5A9F",
 }
+CARDIO_COLOR = "#4ECDC4"
 
 
 def render_rest_timer():
@@ -481,9 +491,10 @@ def render_today(user: dict):
             st.markdown("")
 
     part_labels = [f"{p['label']} · {p['part']}" for p in PARTS]
-    tab_objs = st.tabs(part_labels)
+    tab_labels = part_labels + ["🏃 유산소"]
+    tab_objs = st.tabs(tab_labels)
 
-    for tab, part in zip(tab_objs, PARTS):
+    for tab, part in zip(tab_objs[:-1], PARTS):
         with tab:
             exercises = exercises_for_part(part["key"])
             done_count = 0
@@ -589,6 +600,119 @@ def render_today(user: dict):
                             st.toast(f"{ex['name']} 저장 완료!", icon="✅")
                             st.rerun()
 
+    with tab_objs[-1]:
+        render_cardio_today(user, date_str)
+
+
+# ================= 오늘의 루틴 (유산소) =================
+def render_cardio_today(user: dict, date_str: str):
+    cardio_log_for_date = db.get_cardio_log_for_date(user["id"], date_str)
+    cardio_pr_map = db.get_cardio_personal_records(user["id"])
+
+    done_count = sum(1 for ex in CARDIO_EXERCISES if ex["name"] in cardio_log_for_date)
+
+    st.markdown(
+        f"<span class='part-badge' style='background:{CARDIO_COLOR};'>🏃 유산소</span>",
+        unsafe_allow_html=True,
+    )
+    chip_class = "progress-chip done" if done_count == len(CARDIO_EXERCISES) else "progress-chip"
+    st.markdown(
+        f"<div style='text-align:right; margin-bottom:10px;'>"
+        f"<span class='{chip_class}'>{done_count}/{len(CARDIO_EXERCISES)} 완료</span></div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"<div class='tip-box'>{CARDIO_NOTE}</div>", unsafe_allow_html=True)
+
+    for ex in CARDIO_EXERCISES:
+        base_key = f"{date_str}_CARDIO_{ex['key']}"
+
+        existing = cardio_log_for_date.get(ex["name"])
+        duration_val = str(existing["duration_min"]) if existing and existing.get("duration_min") not in (None, "") else ""
+        distance_val = str(existing.get("distance_km")) if existing and existing.get("distance_km") not in (None, "") else ""
+        calories_val = str(existing.get("calories")) if existing and existing.get("calories") not in (None, "") else ""
+        memo_val = existing.get("memo", "") if existing else ""
+        is_complete = existing is not None
+
+        pr = cardio_pr_map.get(ex["name"])
+        pr_bits = []
+        if pr:
+            if ex["has_distance"]:
+                if pr.get("best_distance"):
+                    pr_bits.append(f"최장 {pr['best_distance']:g}km")
+                if pr.get("best_pace_sec"):
+                    pr_bits.append(f"최고 {format_pace(pr['best_pace_sec'])}")
+            elif pr.get("best_duration"):
+                pr_bits.append(f"최장 {pr['best_duration']:g}분")
+        pr_txt = f" · 🏅 {' / '.join(pr_bits)}" if pr_bits else ""
+
+        with st.expander(f"{'✅ ' if is_complete else ''}{ex['icon']} {ex['name']}{pr_txt}"):
+            st.markdown(
+                f"<div class='equip-line'>🎯 {ex['target']}</div>"
+                f"<div class='equip-line'>🛠️ {ex['equip']}</div>",
+                unsafe_allow_html=True,
+            )
+            if pr_bits:
+                st.markdown(
+                    f"<div class='pr-line'>🏅 최고기록 {' / '.join(pr_bits)}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            if ex.get("tips"):
+                st.markdown("**진행 팁**")
+                st.markdown("\n".join(f"- {t}" for t in ex["tips"]))
+
+            if ex.get("caution"):
+                st.markdown(
+                    f"<div class='caution-box'>⚠️ <b>주의사항</b><br>{ex['caution']}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("---")
+            st.markdown("**유산소 기록**")
+
+            with st.container(key=f"evenrow_{base_key}_inputs"):
+                cols = st.columns(2 if ex["has_distance"] else 1)
+                new_duration = cols[0].text_input(
+                    "시간(분)", value=duration_val, key=f"{base_key}_dur",
+                    label_visibility="collapsed", placeholder="시간(분)",
+                )
+                new_distance = ""
+                if ex["has_distance"]:
+                    new_distance = cols[1].text_input(
+                        "거리(km)", value=distance_val, key=f"{base_key}_dist",
+                        label_visibility="collapsed", placeholder="거리(km)",
+                    )
+
+            if ex["has_distance"] and new_duration and new_distance:
+                try:
+                    d_f, dist_f = float(new_duration), float(new_distance)
+                    if d_f > 0 and dist_f > 0:
+                        st.caption(f"⏱ 페이스: {format_pace(d_f * 60 / dist_f)}")
+                except (TypeError, ValueError):
+                    pass
+
+            new_calories = st.text_input(
+                "칼로리(선택)", value=calories_val, key=f"{base_key}_cal",
+                placeholder="칼로리 (선택, 러닝앱에서 옮겨적기)",
+            )
+            new_memo = st.text_input(
+                "메모", value=memo_val, key=f"{base_key}_memo",
+                placeholder="컨디션, 코스, 날씨 등 메모",
+            )
+
+            if st.button("이 기록 저장", key=f"{base_key}_save", use_container_width=True):
+                ok, err = db.validate_cardio_log(new_duration, new_distance if ex["has_distance"] else None, new_calories)
+                if not ok:
+                    st.error(err)
+                else:
+                    db.save_cardio_log(
+                        user["id"], date_str, ex["name"],
+                        new_duration, new_distance if ex["has_distance"] else None,
+                        new_calories, new_memo,
+                    )
+                    st.toast(f"{ex['name']} 저장 완료!", icon="✅")
+                    st.rerun()
+
 
 # ================= 마이페이지 =================
 def render_mypage(user: dict):
@@ -602,10 +726,17 @@ def render_mypage(user: dict):
         c2.metric("🗓️ 총 기록일", f"{stats['workout_days']}일")
         c3.metric("🏋️ 총 볼륨", f"{stats['total_volume']:,.0f}kg")
 
+    cardio_totals = db.get_cardio_totals(user["id"])
+    if cardio_totals["total_distance_km"] > 0 or cardio_totals["total_duration_min"] > 0:
+        with st.container(key="evenrow_mypage_cardio_stats"):
+            d1, d2 = st.columns(2)
+            d1.metric("🏃 누적 거리", f"{cardio_totals['total_distance_km']:.1f}km")
+            d2.metric("⏱️ 누적 시간", f"{cardio_totals['total_duration_min']:.0f}분")
+
     ui.render_streak_heatmap(db.get_workout_dates(user["id"]))
 
-    tab_pr, tab_badges, tab_history, tab_settings = st.tabs(
-        ["🏅 개인 최고기록", "🎖️ 뱃지", "🗓️ 기록 히스토리", "⚙️ 계정 설정"]
+    tab_pr, tab_cardio_pr, tab_badges, tab_history, tab_settings = st.tabs(
+        ["🏅 개인 최고기록", "🏃 유산소 기록", "🎖️ 뱃지", "🗓️ 기록 히스토리", "⚙️ 계정 설정"]
     )
 
     with tab_pr:
@@ -628,6 +759,25 @@ def render_mypage(user: dict):
             else:
                 chart_data = {h["date"]: h["weight"] for h in history}
                 st.line_chart(chart_data)
+
+    with tab_cardio_pr:
+        cardio_pr_map = db.get_cardio_personal_records(user["id"])
+        if not cardio_pr_map:
+            st.info("아직 유산소 기록이 없어요. '오늘' 화면 🏃 유산소 탭에서 기록해보세요!")
+        else:
+            rows = []
+            for name, rec in sorted(cardio_pr_map.items()):
+                ex_def = CARDIO_EX_BY_NAME.get(name, {})
+                icon = ex_def.get("icon", "🏃")
+                row = {"운동": f"{icon} {name}"}
+                if ex_def.get("has_distance"):
+                    row["최장거리(km)"] = f"{rec['best_distance']:g}" if rec.get("best_distance") else "-"
+                    row["최고페이스"] = format_pace(rec["best_pace_sec"]) if rec.get("best_pace_sec") else "-"
+                else:
+                    row["최장시간(분)"] = f"{rec['best_duration']:g}" if rec.get("best_duration") else "-"
+                rows.append(row)
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.caption("거리가 있는 종목은 최장거리·최고페이스(가장 빠른 기록)를, 거리가 없는 종목은 최장시간을 보여줘요.")
 
     with tab_badges:
         st.caption("꾸준함과 기록이 쌓이면 뱃지가 하나씩 열려요.")

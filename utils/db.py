@@ -49,6 +49,11 @@ def init_indexes():
         unique=True,
     )
     db.logs.create_index([("exercise_name", ASCENDING)])
+    db.cardio_logs.create_index(
+        [("user_id", ASCENDING), ("date", ASCENDING), ("exercise_name", ASCENDING)],
+        unique=True,
+    )
+    db.cardio_logs.create_index([("exercise_name", ASCENDING)])
     db.inquiries.create_index([("created_at", DESCENDING)])
     db.presence.create_index("user_id", unique=True)
     db.presence.create_index("last_seen")
@@ -129,6 +134,7 @@ def delete_user(user_id: str):
     db = get_db()
     db.users.delete_one({"_id": ObjectId(user_id)})
     db.logs.delete_many({"user_id": user_id})
+    db.cardio_logs.delete_many({"user_id": user_id})
     db.presence.delete_one({"user_id": user_id})
 
 
@@ -245,6 +251,147 @@ def get_all_logs(user_id: str) -> list:
 
 def delete_log(user_id: str, date_str: str, exercise_name: str):
     get_db().logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
+
+
+# ================= 유산소 기록 (CARDIO LOGS) =================
+# 근력(logs)과 별도 컬렉션에 저장한다. 구조가 세트×무게×횟수가 아니라
+# "시간(분) + (있으면) 거리(km) + (선택) 칼로리 + 메모"라서 근력 로직을 그대로 못 쓴다.
+
+def has_cardio_log_data(duration_min, memo: str = "") -> bool:
+    if memo and memo.strip():
+        return True
+    return duration_min not in (None, "")
+
+
+def validate_cardio_log(duration_min, distance_km=None, calories=None):
+    """시간(분)은 필수, 거리/칼로리는 입력됐을 때만 숫자인지 확인."""
+    if duration_min in (None, ""):
+        return False, "시간(분)을 입력해주세요."
+    try:
+        dur = float(duration_min)
+    except (TypeError, ValueError):
+        return False, "시간(분)은 숫자로 입력해주세요."
+    if dur <= 0:
+        return False, "시간(분)은 0보다 커야 해요."
+
+    if distance_km not in (None, ""):
+        try:
+            dist = float(distance_km)
+        except (TypeError, ValueError):
+            return False, "거리(km)는 숫자로 입력해주세요."
+        if dist < 0:
+            return False, "거리(km)는 0 이상이어야 해요."
+
+    if calories not in (None, ""):
+        try:
+            cal = float(calories)
+        except (TypeError, ValueError):
+            return False, "칼로리는 숫자로 입력해주세요."
+        if cal < 0:
+            return False, "칼로리는 0 이상이어야 해요."
+
+    return True, ""
+
+
+def save_cardio_log(
+    user_id: str,
+    date_str: str,
+    exercise_name: str,
+    duration_min,
+    distance_km=None,
+    calories=None,
+    memo: str = "",
+):
+    db = get_db()
+    if not has_cardio_log_data(duration_min, memo):
+        db.cardio_logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
+        return
+    db.cardio_logs.update_one(
+        {"user_id": user_id, "date": date_str, "exercise_name": exercise_name},
+        {
+            "$set": {
+                "duration_min": duration_min,
+                "distance_km": distance_km if distance_km not in (None, "") else None,
+                "calories": calories if calories not in (None, "") else None,
+                "memo": memo,
+                "updated_at": datetime.utcnow(),
+            },
+            "$setOnInsert": {"created_at": datetime.utcnow()},
+        },
+        upsert=True,
+    )
+
+
+def get_cardio_log_for_date(user_id: str, date_str: str) -> dict:
+    docs = get_db().cardio_logs.find({"user_id": user_id, "date": date_str})
+    return {
+        d["exercise_name"]: {
+            "duration_min": d.get("duration_min"),
+            "distance_km": d.get("distance_km"),
+            "calories": d.get("calories"),
+            "memo": d.get("memo", ""),
+        }
+        for d in docs
+    }
+
+
+def get_all_cardio_logs(user_id: str) -> list:
+    return list(get_db().cardio_logs.find({"user_id": user_id}).sort("date", DESCENDING))
+
+
+def delete_cardio_log(user_id: str, date_str: str, exercise_name: str):
+    get_db().cardio_logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
+
+
+def get_cardio_personal_records(user_id: str) -> dict:
+    """{운동명: {...}} 유산소 개인 최고기록.
+    거리 있는 종목: best_distance(최장거리) + best_pace_sec(최고페이스=가장 빠른 기록, 초/km)
+    거리 없는 종목: best_duration(최장시간)만 추적."""
+    pr = {}
+    for d in get_all_cardio_logs(user_id):
+        name = d["exercise_name"]
+        cur = pr.setdefault(name, {})
+        date = d["date"]
+
+        try:
+            dur_f = float(d.get("duration_min")) if d.get("duration_min") not in (None, "") else None
+        except (TypeError, ValueError):
+            dur_f = None
+        try:
+            dist_f = float(d.get("distance_km")) if d.get("distance_km") not in (None, "") else None
+        except (TypeError, ValueError):
+            dist_f = None
+
+        if dur_f is not None and (cur.get("best_duration") is None or dur_f > cur["best_duration"]):
+            cur["best_duration"] = dur_f
+            cur["best_duration_date"] = date
+
+        if dist_f is not None and dist_f > 0:
+            if cur.get("best_distance") is None or dist_f > cur["best_distance"]:
+                cur["best_distance"] = dist_f
+                cur["best_distance_date"] = date
+            if dur_f is not None and dur_f > 0:
+                pace = dur_f * 60 / dist_f
+                if cur.get("best_pace_sec") is None or pace < cur["best_pace_sec"]:
+                    cur["best_pace_sec"] = pace
+                    cur["best_pace_date"] = date
+    return pr
+
+
+def get_cardio_totals(user_id: str) -> dict:
+    """마이페이지 통계용: 총 누적 거리(km) / 총 누적 시간(분). (근력 '총 볼륨'과는 별도 지표)"""
+    total_distance = 0.0
+    total_duration = 0.0
+    for d in get_all_cardio_logs(user_id):
+        try:
+            total_duration += float(d.get("duration_min") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            total_distance += float(d.get("distance_km") or 0)
+        except (TypeError, ValueError):
+            pass
+    return {"total_distance_km": total_distance, "total_duration_min": total_duration}
 
 
 def _best_from_sets(sets: list):
@@ -450,7 +597,8 @@ def delete_own_account(user_id: str, password: str):
 # ================= 개인 통계 (볼륨/스트릭) =================
 
 def get_user_stats(user_id: str, today_str: str) -> dict:
-    """총 볼륨(무게×횟수 합), 총 기록일 수, 오늘 기준 연속 기록일(스트릭)."""
+    """총 볼륨(무게×횟수 합, 근력 전용), 총 기록일 수, 오늘 기준 연속 기록일(스트릭).
+    기록일/스트릭은 근력이든 유산소든 그 날 기록을 남겼으면 카운트한다."""
     logs = get_all_logs(user_id)
     total_volume = 0.0
     dates = set()
@@ -463,6 +611,9 @@ def get_user_stats(user_id: str, today_str: str) -> dict:
             except (KeyError, TypeError, ValueError):
                 continue
             total_volume += w * r
+
+    for d in get_db().cardio_logs.find({"user_id": user_id}, {"date": 1}):
+        dates.add(d["date"])
 
     streak = 0
     if dates:
@@ -549,9 +700,11 @@ def get_signup_counts_by_day(days: int = 14) -> list:
 
 def get_today_checkins(date_str: str, total_exercise_count: int) -> list:
     """오늘 하나라도 기록을 남긴 사람들을, 완료한 종목 수 기준 내림차순으로 반환.
+    근력(logs) + 유산소(cardio_logs) 기록을 모두 합쳐서 집계한다 (유산소만 한 사람도 보이도록).
     [{nickname, done_count, total, updated_at}]"""
     database = get_db()
     docs = list(database.logs.find({"date": date_str}, {"user_id": 1, "updated_at": 1}))
+    docs += list(database.cardio_logs.find({"date": date_str}, {"user_id": 1, "updated_at": 1}))
     if not docs:
         return []
     per_user = {}
@@ -605,8 +758,10 @@ def get_weight_history(user_id: str, exercise_name: str) -> list:
 # ================= 스트릭 히트맵용 기록일 집합 =================
 
 def get_workout_dates(user_id: str) -> set:
-    """기록이 있는 날짜 문자열(YYYY-MM-DD) 집합."""
-    return {d["date"] for d in get_db().logs.find({"user_id": user_id}, {"date": 1})}
+    """기록이 있는 날짜 문자열(YYYY-MM-DD) 집합. 근력이든 유산소든 기록을 남긴 날은 모두 포함."""
+    dates = {d["date"] for d in get_db().logs.find({"user_id": user_id}, {"date": 1})}
+    dates |= {d["date"] for d in get_db().cardio_logs.find({"user_id": user_id}, {"date": 1})}
+    return dates
 
 
 # ================= 오운완 인증카드용 날짜 요약 =================
