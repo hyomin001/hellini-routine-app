@@ -31,6 +31,73 @@
 ## 화면 이동 방식
 사이드바가 아니라 로그인 후 보이는 화면 상단의 버튼(🏠 오늘 / 📖 기록 / 🏆 랭킹 / 💬 문의 / 🛠️ 관리)으로 페이지를 전환합니다. `pages/` 폴더 방식의 Streamlit 멀티페이지가 아니라 `app.py` 하나에서 `st.session_state`로 화면을 바꾸는 단일 페이지 구조라, 모바일에서도 사이드바를 펼칠 필요 없이 바로 버튼이 보여요. (예전에 남아있던 `pages/*.py` 사이드바 기반 구버전 화면들은 이 구조와 중복·충돌하는 죽은 코드라 정리했습니다.)
 
+## 프로젝트 구조 (폴더 / 파일 설명)
+
+```
+hellini-routine-app/
+├── app.py                        # ⭐ 메인 엔트리. 이 파일 하나로 화면 전환(로그인/오늘/마이페이지/랭킹/문의/관리/피드)까지 전부 처리
+├── requirements.txt               # 배포에 필요한 파이썬 패키지 목록 (streamlit, pymongo, Pillow 등)
+├── README.md                      # 이 문서
+│
+├── utils/                         # app.py가 가져다 쓰는 로직 모음 (화면과 로직을 분리)
+│   ├── __init__.py                #   utils를 파이썬 패키지로 만들어주는 파일 (설명 주석만 있음)
+│   ├── auth.py                    #   비밀번호 해싱/검증 (PBKDF2-HMAC-SHA256, 외부 의존성 없이 구현)
+│   ├── db.py                      #   ⭐ MongoDB 데이터 계층. 회원가입/로그인, 운동·유산소 기록 저장/조회,
+│   │                               #      랭킹·PR 계산, 문의, 인증샷 게시판, 관리자 통계 등 DB와 관련된
+│   │                               #      모든 함수가 여기 모여 있음 (약 60개 함수, 기능별로 섹션 주석 구분)
+│   ├── data.py                    #   운동 종류/부위(PART1~4) 정의, 유산소 종목 정의, 시간·페이스 포맷 헬퍼,
+│   │                               #      업데이트 로그(UPDATE_LOG) 등 "정적 데이터 + 순수 함수" 모음
+│   ├── exercises_data.json        #   근력 운동 23종의 상세 데이터(이름/부위/방법/주의사항/이미지 파일명 등).
+│   │                               #      data.py가 이 파일을 읽어서 EX_BY_NAME 등을 만듦
+│   ├── ui.py                      #   여러 페이지에서 재사용하는 화면 조각(위젯) 렌더링 함수 모음
+│   │                               #      (계정 설정 폼, 기록 수정 카드, CSV 생성, 스트릭 히트맵, 뱃지 등)
+│   └── card.py                    #   그날의 기록을 인스타 스토리 규격(1080x1920) PNG 카드로 그려주는 모듈
+│                                   #      (Pillow로 직접 이미지를 그림, 나눔고딕 폰트 사용)
+│
+├── scripts/                       # 로컬/CI에서 커맨드라인으로 실행하는 유지보수용 스크립트
+│   ├── backup_mongo.py            #   MongoDB 전체 컬렉션을 JSON으로 내보내 backups/latest에 저장
+│   │                               #      (.github/workflows/backup-mongo.yml이 매일 자동 실행)
+│   └── restore_mongo.py           #   backups 폴더의 JSON 백업을 MongoDB로 복원 (수동 실행, 재해복구용)
+│
+├── backups/latest/                # backup_mongo.py가 만들어내는 자동 백업 결과물 (매일 갱신되는 데이터 파일)
+│   ├── _meta.json                 #   마지막 백업 시각, DB 이름, 컬렉션별 문서 수
+│   ├── users.json                 #   회원 데이터 백업 (비밀번호는 해시된 값만 저장됨)
+│   ├── logs.json                  #   운동 기록 백업
+│   └── inquiries.json             #   문의 데이터 백업
+│
+├── assets/
+│   ├── exercises/                 # 운동 방법을 보여주는 이미지들 (image1.jpg ~ image37.jpg 등)
+│   └── fonts/                     # 인증샷 카드(card.py)에서 쓰는 한글 폰트 (나눔고딕 Regular/Bold)
+│
+├── .streamlit/
+│   ├── config.toml                # Streamlit 다크 테마 색상 등 앱 UI 설정
+│   └── secrets.toml.example       # secrets.toml에 어떤 값(MONGO_URI, ADMIN_USERNAMES 등)을 넣어야 하는지
+│                                   #    보여주는 예시 파일. 실제 secrets.toml은 git에 커밋하지 않음(.gitignore 처리)
+│
+├── .github/workflows/
+│   └── backup-mongo.yml           # 매일 KST 00:00에 scripts/backup_mongo.py를 자동 실행해서
+│                                   #    backups/ 폴더에 커밋·푸시하는 GitHub Actions 워크플로
+│
+└── .gitignore                     # secrets.toml, __pycache__ 등 git에 올리면 안 되는 파일 제외 목록
+```
+
+### 각 파일이 하는 일 요약
+| 파일 | 역할 |
+|---|---|
+| `app.py` | 화면(UI)과 라우팅. 모든 페이지의 `render_xxx()` 함수와 최하단 라우팅 로직이 들어있음 |
+| `utils/db.py` | 데이터베이스(MongoDB) 읽기/쓰기 담당. "저장한다/조회한다/계산한다"는 대부분 여기 |
+| `utils/data.py` + `exercises_data.json` | 운동 종류, 부위, 유산소 종목 등 앱이 다루는 "고정된 데이터" |
+| `utils/ui.py` | app.py 여러 페이지에서 공통으로 쓰는 화면 부품 |
+| `utils/card.py` | 인증샷 다운로드 카드(PNG) 이미지를 직접 그려주는 모듈 |
+| `utils/auth.py` | 비밀번호를 안전하게 저장/검증하기 위한 암호화 함수 |
+| `scripts/*.py` | 앱 실행과 무관한, DB 백업/복원용 별도 스크립트 |
+| `.github/workflows/backup-mongo.yml` | 위 백업 스크립트를 매일 자동으로 돌려주는 설정 |
+| `backups/latest/*.json` | 자동 백업으로 쌓인 실제 데이터 스냅샷 (코드 아님) |
+| `assets/` | 이미지·폰트 등 정적 리소스 (코드 아님) |
+
+> 각 `.py` 파일 안의 함수들에도 어떤 역할을 하는지 한글 docstring을 달아뒀으니,
+> GitHub에서 파일을 열어보면 함수별 설명도 바로 확인할 수 있습니다.
+
 ## 관리자 계정 만들기
 1. 앱에서 **회원가입** 탭으로 아이디 `admin`, 비밀번호 `0727`, 원하는 닉네임으로 가입합니다. (비밀번호는 4자 이상이면 되고, 배포 후 원하면 바꿔도 됩니다)
 2. Streamlit Cloud의 Secrets에 `ADMIN_USERNAMES = "admin"` 을 추가합니다. (아래 배포 방법 참고)
