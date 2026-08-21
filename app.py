@@ -17,6 +17,9 @@ from utils.data import (
     CARDIO_EX_BY_NAME,
     CARDIO_NOTE,
     format_pace,
+    parse_duration,
+    split_duration,
+    format_duration,
 )
 
 # Streamlit Cloud 서버는 UTC 기준으로 동작하므로 dt.date.today()를 그대로 쓰면
@@ -627,7 +630,7 @@ def render_cardio_today(user: dict, date_str: str):
         base_key = f"{date_str}_CARDIO_{ex['key']}"
 
         existing = cardio_log_for_date.get(ex["name"])
-        duration_val = str(existing["duration_min"]) if existing and existing.get("duration_min") not in (None, "") else ""
+        min_val, sec_val = split_duration(existing["duration_min"]) if existing else ("", "")
         distance_val = str(existing.get("distance_km")) if existing and existing.get("distance_km") not in (None, "") else ""
         calories_val = str(existing.get("calories")) if existing and existing.get("calories") not in (None, "") else ""
         memo_val = existing.get("memo", "") if existing else ""
@@ -642,7 +645,7 @@ def render_cardio_today(user: dict, date_str: str):
                 if pr.get("best_pace_sec"):
                     pr_bits.append(f"최고 {format_pace(pr['best_pace_sec'])}")
             elif pr.get("best_duration"):
-                pr_bits.append(f"최장 {pr['best_duration']:g}분")
+                pr_bits.append(f"최장 {format_duration(pr['best_duration'])}")
         pr_txt = f" · 🏅 {' / '.join(pr_bits)}" if pr_bits else ""
 
         with st.expander(f"{'✅ ' if is_complete else ''}{ex['icon']} {ex['name']}{pr_txt}"):
@@ -671,25 +674,31 @@ def render_cardio_today(user: dict, date_str: str):
             st.markdown("**유산소 기록**")
 
             with st.container(key=f"evenrow_{base_key}_inputs"):
-                cols = st.columns(2 if ex["has_distance"] else 1)
-                new_duration = cols[0].text_input(
-                    "시간(분)", value=duration_val, key=f"{base_key}_dur",
-                    label_visibility="collapsed", placeholder="시간(분)",
+                cols = st.columns(3 if ex["has_distance"] else 2)
+                new_min = cols[0].text_input(
+                    "분", value=min_val, key=f"{base_key}_min",
+                    label_visibility="collapsed", placeholder="분",
+                )
+                new_sec = cols[1].text_input(
+                    "초", value=sec_val, key=f"{base_key}_sec",
+                    label_visibility="collapsed", placeholder="초",
                 )
                 new_distance = ""
                 if ex["has_distance"]:
-                    new_distance = cols[1].text_input(
+                    new_distance = cols[2].text_input(
                         "거리(km)", value=distance_val, key=f"{base_key}_dist",
                         label_visibility="collapsed", placeholder="거리(km)",
                     )
 
-            if ex["has_distance"] and new_duration and new_distance:
-                try:
-                    d_f, dist_f = float(new_duration), float(new_distance)
-                    if d_f > 0 and dist_f > 0:
-                        st.caption(f"⏱ 페이스: {format_pace(d_f * 60 / dist_f)}")
-                except (TypeError, ValueError):
-                    pass
+            if ex["has_distance"] and (new_min or new_sec) and new_distance:
+                preview_dur, preview_err = parse_duration(new_min, new_sec)
+                if not preview_err and preview_dur:
+                    try:
+                        dist_f = float(new_distance)
+                        if preview_dur > 0 and dist_f > 0:
+                            st.caption(f"⏱ 페이스: {format_pace(preview_dur * 60 / dist_f)}")
+                    except (TypeError, ValueError):
+                        pass
 
             new_calories = st.text_input(
                 "칼로리(선택)", value=calories_val, key=f"{base_key}_cal",
@@ -701,17 +710,21 @@ def render_cardio_today(user: dict, date_str: str):
             )
 
             if st.button("이 기록 저장", key=f"{base_key}_save", use_container_width=True):
-                ok, err = db.validate_cardio_log(new_duration, new_distance if ex["has_distance"] else None, new_calories)
-                if not ok:
-                    st.error(err)
+                new_duration, dur_err = parse_duration(new_min, new_sec)
+                if dur_err:
+                    st.error(dur_err)
                 else:
-                    db.save_cardio_log(
-                        user["id"], date_str, ex["name"],
-                        new_duration, new_distance if ex["has_distance"] else None,
-                        new_calories, new_memo,
-                    )
-                    st.toast(f"{ex['name']} 저장 완료!", icon="✅")
-                    st.rerun()
+                    ok, err = db.validate_cardio_log(new_duration, new_distance if ex["has_distance"] else None, new_calories)
+                    if not ok:
+                        st.error(err)
+                    else:
+                        db.save_cardio_log(
+                            user["id"], date_str, ex["name"],
+                            new_duration, new_distance if ex["has_distance"] else None,
+                            new_calories, new_memo,
+                        )
+                        st.toast(f"{ex['name']} 저장 완료!", icon="✅")
+                        st.rerun()
 
 
 # ================= 마이페이지 =================
@@ -774,7 +787,7 @@ def render_mypage(user: dict):
                     row["최장거리(km)"] = f"{rec['best_distance']:g}" if rec.get("best_distance") else "-"
                     row["최고페이스"] = format_pace(rec["best_pace_sec"]) if rec.get("best_pace_sec") else "-"
                 else:
-                    row["최장시간(분)"] = f"{rec['best_duration']:g}" if rec.get("best_duration") else "-"
+                    row["최장시간"] = format_duration(rec["best_duration"]) if rec.get("best_duration") else "-"
                 rows.append(row)
             st.dataframe(rows, use_container_width=True, hide_index=True)
             st.caption("거리가 있는 종목은 최장거리·최고페이스(가장 빠른 기록)를, 거리가 없는 종목은 최장시간을 보여줘요.")

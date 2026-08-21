@@ -167,6 +167,46 @@ def format_pace(sec_per_km: float) -> str:
     return f"{m}'{s:02d}\"/km"
 
 
+def parse_duration(min_val, sec_val):
+    """운동시간 입력창의 '분'/'초' 두 값을 분 단위 float 하나로 합친다.
+    (예: 19분 30초 -> 19.5) 러닝 페이스처럼 초 단위까지 정확해야 하는 계산에 필요.
+    둘 다 비어있으면 (None, None), 값이 있는데 형식이 잘못되면 (None, 에러메시지)."""
+    min_val = min_val.strip() if isinstance(min_val, str) else min_val
+    sec_val = sec_val.strip() if isinstance(sec_val, str) else sec_val
+    if min_val in (None, "") and sec_val in (None, ""):
+        return None, None
+    try:
+        m = float(min_val) if min_val not in (None, "") else 0.0
+        s = float(sec_val) if sec_val not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        return None, "시간은 숫자로 입력해주세요."
+    if m < 0 or s < 0:
+        return None, "시간은 0 이상이어야 해요."
+    if s >= 60:
+        return None, "초는 0~59 사이로 입력해주세요."
+    return m + s / 60.0, None
+
+
+def split_duration(total_min):
+    """분 단위 값(float)을 (분 문자열, 초 문자열) 입력창 표시용으로 쪼갠다."""
+    try:
+        total_sec = round(float(total_min) * 60)
+    except (TypeError, ValueError):
+        return "", ""
+    m, s = divmod(total_sec, 60)
+    return str(m), str(s)
+
+
+def format_duration(total_min) -> str:
+    """분 단위 값(float)을 '19분 30초' 같은 표시용 문자열로 변환."""
+    try:
+        total_sec = round(float(total_min) * 60)
+    except (TypeError, ValueError):
+        return "-"
+    m, s = divmod(total_sec, 60)
+    return f"{m}분 {s:02d}초" if s else f"{m}분"
+
+
 # 앱 업데이트 내역 (마이페이지 아니라, '오늘' 화면의 '업데이트 현황'에서 유저들에게 보여준다).
 # 새 업데이트가 생기면 리스트 맨 위에 추가하면 된다 (최신순으로 그대로 렌더링됨).
 UPDATE_LOG = [
@@ -175,6 +215,7 @@ UPDATE_LOG = [
         "items": [
             "🏃 유산소 카테고리 추가: 러닝 · 사이클링 · 줄넘기 · 수영 · 로잉머신 · 일립티컬 · "
             "계단 오르기 · 등산/하이킹 8종목 ('오늘' 화면 새 탭 '🏃 유산소'에서 확인)",
+            "유산소 시간 입력을 '분'만 → '분 + 초'로 세분화 (예: 19분 30초). 페이스도 초 단위까지 정확하게 계산",
             "마이페이지에 유산소 누적 거리·시간 통계, 유산소 최고기록 탭 추가",
             "운동 종목 10개 추가: 팔굽혀펴기 · 플랫 벤치 프레스 · 딥스 · 펙 덱 플라이 · 풀업(턱걸이) · "
             "데드리프트 · 윗몸일으키기 · 플랭크 · 워킹 런지 · 오버헤드 트라이셉스 익스텐션",

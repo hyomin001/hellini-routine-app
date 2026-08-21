@@ -23,7 +23,7 @@ import io
 import streamlit as st
 
 from utils import db
-from utils.data import CARDIO_EX_BY_NAME
+from utils.data import CARDIO_EX_BY_NAME, parse_duration, split_duration, format_duration
 
 BASE_CSS = """
 <style>
@@ -366,7 +366,7 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
     icon = ex_def.get("icon", "🏃")
 
     if not editing:
-        bits = [f"{c.get('duration_min', '')}분"]
+        bits = [format_duration(c.get("duration_min"))]
         if c.get("distance_km") not in (None, ""):
             bits.append(f"{c['distance_km']}km")
         if c.get("calories") not in (None, ""):
@@ -386,15 +386,20 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
     else:
         st.markdown(f"**{icon} {c['exercise_name']}** 수정 중")
 
+        min_val, sec_val = split_duration(c.get("duration_min"))
         with st.container(key=f"evenrow_cardioedit_{entry_id}"):
-            cols = st.columns(2 if has_distance else 1)
-            dur_val = cols[0].text_input(
-                "시간(분)", value=str(c.get("duration_min") or ""), key=f"cedit_dur_{entry_id}",
-                label_visibility="collapsed", placeholder="시간(분)",
+            cols = st.columns(3 if has_distance else 2)
+            new_min = cols[0].text_input(
+                "분", value=min_val, key=f"cedit_min_{entry_id}",
+                label_visibility="collapsed", placeholder="분",
+            )
+            new_sec = cols[1].text_input(
+                "초", value=sec_val, key=f"cedit_sec_{entry_id}",
+                label_visibility="collapsed", placeholder="초",
             )
             dist_val = ""
             if has_distance:
-                dist_val = cols[1].text_input(
+                dist_val = cols[2].text_input(
                     "거리(km)", value=str(c.get("distance_km") or ""), key=f"cedit_dist_{entry_id}",
                     label_visibility="collapsed", placeholder="거리(km)",
                 )
@@ -408,17 +413,21 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
         with st.container(key=f"evenrow_cardioeditbtns_{entry_id}"):
             b1, b2 = st.columns(2)
             if b1.button("💾 저장", key=f"csave_{entry_id}", use_container_width=True, type="primary"):
-                ok, err = db.validate_cardio_log(dur_val, dist_val if has_distance else None, cal_val)
-                if not ok:
-                    st.error(err)
+                dur_val, dur_err = parse_duration(new_min, new_sec)
+                if dur_err:
+                    st.error(dur_err)
                 else:
-                    db.save_cardio_log(
-                        user["id"], c["date"], c["exercise_name"],
-                        dur_val, dist_val if has_distance else None, cal_val, memo_val,
-                    )
-                    st.session_state[edit_key] = False
-                    st.toast(f"{c['exercise_name']} 수정 완료!", icon="✅")
-                    st.rerun()
+                    ok, err = db.validate_cardio_log(dur_val, dist_val if has_distance else None, cal_val)
+                    if not ok:
+                        st.error(err)
+                    else:
+                        db.save_cardio_log(
+                            user["id"], c["date"], c["exercise_name"],
+                            dur_val, dist_val if has_distance else None, cal_val, memo_val,
+                        )
+                        st.session_state[edit_key] = False
+                        st.toast(f"{c['exercise_name']} 수정 완료!", icon="✅")
+                        st.rerun()
             if b2.button("취소", key=f"ccancel_{entry_id}", use_container_width=True):
                 st.session_state[edit_key] = False
                 st.rerun()
