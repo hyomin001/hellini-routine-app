@@ -85,6 +85,38 @@ def _add_speed_lines(img, corner, color, alpha, count):
     return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
 
 
+def _wrap_text(draw, text, font, max_width, max_lines):
+    """일반 텍스트(메모)를 max_width 안에 들어가도록 줄바꿈. max_lines를 넘으면 말줄임표 처리."""
+    lines, cur = [], ""
+    truncated = False
+    consumed = 0
+    for ch in text:
+        test = cur + ch
+        if cur and _text_w(draw, test, font) > max_width:
+            lines.append(cur)
+            consumed += len(cur)
+            cur = ch
+            if len(lines) == max_lines:
+                truncated = True
+                break
+        else:
+            cur = test
+    else:
+        if cur:
+            lines.append(cur)
+            consumed += len(cur)
+
+    if truncated or consumed < len(text):
+        if len(lines) < max_lines:
+            lines.append(cur)
+        lines = lines[:max_lines]
+        last = lines[-1] if lines else ""
+        while last and _text_w(draw, last + "…", font) > max_width:
+            last = last[:-1]
+        lines[-1] = last + "…" if lines else "…"
+    return lines
+
+
 def _wrap_chips(draw, chips, font, max_width, pad_x=18, gap=12):
     """chips: [(text, fg, bg), ...]. max_width 안에 들어가도록 줄바꿈해서
     [[(text,fg,bg,w), ...], ...] 형태의 줄(line) 목록을 반환한다."""
@@ -185,6 +217,10 @@ def generate_workout_card(
         pad_top, pad_bottom = max(12, int(18 * scale)), max(12, int(16 * scale))
         name_line_h = max(30, int(46 * scale))
         max_chip_lines = 2 if scale > 0.7 else 1
+        memo_f = _font(_REG_PATH, max(18, int(25 * scale)))
+        memo_line_h = max(24, int(32 * scale))
+        memo_gap = max(6, int(10 * scale))
+        max_memo_lines = 2 if scale > 0.8 else 1
 
         blocks = []
         for row in shown_rows:
@@ -194,10 +230,19 @@ def generate_workout_card(
             if truncated:
                 lines = lines[:max_chip_lines]
             block_h = pad_top + name_line_h + len(lines) * chip_h + max(0, len(lines) - 1) * line_gap + pad_bottom
+
+            memo_lines = []
+            memo_text = (row.get("memo") or "").strip()
+            if memo_text:
+                memo_lines = _wrap_text(d, f"“{memo_text}”", memo_f, content_max_w, max_memo_lines)
+                block_h += memo_gap + len(memo_lines) * memo_line_h
+
             blocks.append({
                 "row": row, "lines": lines, "h": block_h, "truncated": truncated,
                 "name_f": name_f, "c_f": c_f, "chip_h": chip_h, "line_gap": line_gap,
                 "pad_top": pad_top, "name_line_h": name_line_h,
+                "memo_lines": memo_lines, "memo_f": memo_f,
+                "memo_line_h": memo_line_h, "memo_gap": memo_gap,
             })
         return blocks
 
@@ -263,6 +308,12 @@ def generate_workout_card(
         for line in b["lines"]:
             _draw_chip_line(d, content_x, ty, line, b["c_f"], b["chip_h"])
             ty += b["chip_h"] + b["line_gap"]
+
+        if b["memo_lines"]:
+            ty += b["memo_gap"] - b["line_gap"]
+            for ml in b["memo_lines"]:
+                d.text((content_x, ty), ml, font=b["memo_f"], fill=SUB)
+                ty += b["memo_line_h"]
 
         y += block_h + 18
 

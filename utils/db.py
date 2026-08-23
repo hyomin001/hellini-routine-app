@@ -806,9 +806,10 @@ def get_date_summary(user_id: str, date_str: str):
 
     반환: (rows, total_volume)
     rows = [
-        {"type": "strength", "exercise_name": str, "sets": [{"weight": float, "reps": int}, ...]},
+        {"type": "strength", "exercise_name": str, "sets": [{"weight": float, "reps": int}, ...],
+         "memo": str},
         {"type": "cardio", "exercise_name": str, "duration_min": float|None,
-         "distance_km": float|None, "calories": float|None},
+         "distance_km": float|None, "calories": float|None, "memo": str},
     ]
     기록 없으면 ([], 0.0). 근력은 세트를 지운 최고기록 하나가 아니라 그날 친 세트 전부를 담는다.
     """
@@ -827,7 +828,10 @@ def get_date_summary(user_id: str, date_str: str):
             total_volume += w * r
         if not sets:
             continue
-        rows.append({"type": "strength", "exercise_name": d["exercise_name"], "sets": sets})
+        rows.append({
+            "type": "strength", "exercise_name": d["exercise_name"], "sets": sets,
+            "memo": (d.get("memo") or "").strip(),
+        })
 
     cardio_docs = list(get_db().cardio_logs.find({"user_id": user_id, "date": date_str}))
     for d in cardio_docs:
@@ -837,6 +841,7 @@ def get_date_summary(user_id: str, date_str: str):
             "duration_min": d.get("duration_min"),
             "distance_km": d.get("distance_km"),
             "calories": d.get("calories"),
+            "memo": (d.get("memo") or "").strip(),
         })
     return rows, total_volume
 
