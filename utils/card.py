@@ -5,9 +5,16 @@
 전용 요약 카드를 따로 그려서 다운로드할 수 있게 한다.
 
 rows 포맷 (utils/db.py::get_date_summary 참고):
-  {"type": "strength", "exercise_name": str, "sets": [{"weight": float, "reps": int}, ...]}
+  {"type": "strength", "exercise_name": str, "sets": [{"weight": float, "reps": int}, ...], "memo": str}
   {"type": "cardio", "exercise_name": str, "duration_min": float|None,
-   "distance_km": float|None, "calories": float|None}
+   "distance_km": float|None, "calories": float|None, "memo": str}
+
+레이아웃은 두 단계로 동작한다.
+  1) "카드" 모드: 종목마다 박스 + 세트 칩 + 메모 한 줄까지 예쁘게 보여주는 기본 모드.
+     종목 수가 적을 때(대략 8~9개 이하) 이 모드로 전부 들어간다.
+  2) "컴팩트" 모드: 카드 모드로는 다 안 들어갈 만큼 종목이 많을 때(10개, 20개...) 자동 전환.
+     종목당 한 줄(번호 + 이름 + 세트 요약)로 촘촘하게 표시해서, 어지간해서는 종목이
+     "+N개 종목 더"로 잘리지 않고 전부 보이게 한다. 메모는 컴팩트 모드에서는 생략된다.
 """
 import io
 import os
@@ -34,7 +41,9 @@ TEXT = (245, 244, 239)
 SUB = (150, 154, 165)
 CHIP_BG = (40, 42, 49)
 
-MAX_ROWS_SHOWN = 10
+# 물리적으로 한 장에 다 못 담을 극단적인 경우를 위한 안전장치용 상한선.
+# (일반적인 하루 운동 기록은 이 아래이므로 실질적으로는 전부 표시된다)
+HARD_CAP_ROWS = 60
 
 
 def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
@@ -49,6 +58,16 @@ def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> float:
 def _center_text(draw, cx, y, text, font, fill):
     w = _text_w(draw, text, font)
     draw.text((cx - w / 2, y), text, font=font, fill=fill)
+
+
+def _fit_ellipsis(draw, text, font, max_width):
+    """한 줄 안에 들어가도록 필요하면 말줄임표(…)로 잘라낸다."""
+    if _text_w(draw, text, font) <= max_width:
+        return text
+    t = text
+    while t and _text_w(draw, t + "…", font) > max_width:
+        t = t[:-1]
+    return (t + "…") if t else "…"
 
 
 def _gradient_bg(w, h, top, bottom):
@@ -160,6 +179,13 @@ def _build_row_chips(row):
     return [(f"{s['weight']:g}kg×{s['reps']}회", (20, 18, 16), ACCENT) for s in row["sets"]]
 
 
+def _row_summary_text(row):
+    """컴팩트 모드용: row의 세트/기록을 한 줄짜리 텍스트로 요약."""
+    if row["type"] == "cardio":
+        return " · ".join(c[0] for c in _build_row_chips(row))
+    return " · ".join(f"{s['weight']:g}kg×{s['reps']}회" for s in row["sets"])
+
+
 def generate_workout_card(
     nickname: str,
     date_str: str,
@@ -198,7 +224,7 @@ def generate_workout_card(
 
     card_left, card_right = 80, W - 80
     card_w = card_right - card_left
-    content_x = card_left + 100          # 이름/칩 시작 x
+    content_x = card_left + 100          # 카드 모드 이름/칩 시작 x
     content_max_w = card_right - 40 - content_x
 
     nickname_card_h = 168
@@ -208,7 +234,12 @@ def generate_workout_card(
     bottom_reserved = 128
     available = H - header_bottom - bottom_reserved
 
-    # ---- 스케일을 줄여가며 각 종목 블록을 구성 (다 안 들어가면 폰트/줄 수를 줄여서 맞춘다) ----
+    all_rows = rows[:HARD_CAP_ROWS]
+
+    # =========================================================
+    # 1단계: "카드" 모드 — 종목마다 박스 + 세트 칩 + 메모.
+    # 스케일을 촘촘히 줄여가며 전체 종목이 다 들어가는지 시도한다.
+    # =========================================================
     def build_blocks(shown_rows, scale):
         chip_h = max(34, int(46 * scale))
         line_gap = max(8, int(12 * scale))
@@ -246,82 +277,157 @@ def generate_workout_card(
             })
         return blocks
 
-    shown = rows[:MAX_ROWS_SHOWN]
-    scale = 1.0
-    blocks = build_blocks(shown, scale)
-    more_line_h = 50
-
-    def total_h(blocks, has_more):
+    def card_total_h(blocks, has_more, more_line_h=50):
         return (nickname_card_h + gap + sum(b["h"] + 18 for b in blocks)
                 + (more_line_h if has_more else 0) + gap + footer_card_h)
 
-    # 1) 폰트/칩 스케일을 줄여본다
-    while total_h(blocks, len(rows) > len(shown)) > available and scale > 0.62:
-        scale -= 0.08
-        blocks = build_blocks(shown, scale)
+    card_scale = 1.0
+    card_blocks = build_blocks(all_rows, card_scale)
+    while card_total_h(card_blocks, False) > available and card_scale > 0.55:
+        card_scale = round(card_scale - 0.04, 2)
+        card_blocks = build_blocks(all_rows, card_scale)
+    card_fits = card_total_h(card_blocks, False) <= available
 
-    # 2) 그래도 안 들어가면 보여주는 종목 수 자체를 줄인다
-    while total_h(blocks, True) > available and len(shown) > 1:
-        shown = shown[:-1]
-        blocks = build_blocks(shown, scale)
+    mode = "card" if card_fits else "compact"
 
-    content_h = total_h(blocks, len(rows) > len(shown))
-    start_y = header_bottom + max(10, (available - content_h) / 2)
-    if start_y + content_h > H - bottom_reserved:
-        start_y = max(header_bottom + 10, H - bottom_reserved - content_h)
+    # =========================================================
+    # 2단계: 카드 모드로 다 안 들어가면 "컴팩트" 모드로 전환.
+    # 종목당 한 줄(번호 + 이름 + 세트 요약)로 촘촘하게 그려서
+    # 어지간한 종목 수(20개 이상)도 전부 표시되게 한다.
+    # =========================================================
+    if mode == "compact":
+        compact_pad = 26
 
-    y = start_y
+        def build_compact(shown_rows, scale):
+            row_h = max(30, int(50 * scale))
+            name_f = _font(_BOLD_PATH, max(17, int(29 * scale)))
+            sets_f = _font(_REG_PATH, max(15, int(25 * scale)))
+            badge_r = max(11, int(19 * scale))
+            badge_f = _font(_BOLD_PATH, max(13, int(20 * scale)))
+            return row_h, name_f, sets_f, badge_r, badge_f
 
-    # ---- 닉네임 카드 ----
-    d.rounded_rectangle([card_left, y, card_right, y + nickname_card_h], radius=28,
-                         fill=CARD_BG, outline=BORDER, width=2)
-    d.rounded_rectangle([card_left, y, card_left + 10, y + nickname_card_h], radius=5, fill=ACCENT)
-    _center_text(d, W / 2, y + 32, f"{nickname} 님의 오늘 🔥", nickname_f, TEXT)
-    _center_text(d, W / 2, y + 112, f"{len(rows)}개 종목 완료 · 연속 {streak}일째", tag_f, MINT)
-    y += nickname_card_h + gap
+        def compact_total_h(n_rows, row_h, has_more, more_line_h=44):
+            return (nickname_card_h + gap + compact_pad * 2 + n_rows * row_h
+                    + (more_line_h if has_more else 0) + gap + footer_card_h)
 
-    # ---- 종목 블록들 ----
-    for idx, b in enumerate(blocks):
-        row = b["row"]
-        block_h = b["h"]
-        is_cardio = row["type"] == "cardio"
-        badge_color = MINT if is_cardio else ACCENT
+        compact_scale = 1.0
+        row_h, name_f, sets_f, badge_r, badge_f = build_compact(all_rows, compact_scale)
+        while compact_total_h(len(all_rows), row_h, False) > available and compact_scale > 0.45:
+            compact_scale = round(compact_scale - 0.05, 2)
+            row_h, name_f, sets_f, badge_r, badge_f = build_compact(all_rows, compact_scale)
 
-        d.rounded_rectangle([card_left, y, card_right, y + block_h], radius=22,
+        shown = all_rows
+        has_more = False
+        if compact_total_h(len(shown), row_h, False) > available:
+            has_more = True
+            while compact_total_h(len(shown), row_h, True) > available and len(shown) > 1:
+                shown = shown[:-1]
+
+        content_h = compact_total_h(len(shown), row_h, has_more)
+        start_y = header_bottom + max(10, (available - content_h) / 2)
+        if start_y + content_h > H - bottom_reserved:
+            start_y = max(header_bottom + 10, H - bottom_reserved - content_h)
+        y = start_y
+
+        # ---- 닉네임 카드 ----
+        d.rounded_rectangle([card_left, y, card_right, y + nickname_card_h], radius=28,
+                             fill=CARD_BG, outline=BORDER, width=2)
+        d.rounded_rectangle([card_left, y, card_left + 10, y + nickname_card_h], radius=5, fill=ACCENT)
+        _center_text(d, W / 2, y + 32, f"{nickname} 님의 오늘 🔥", nickname_f, TEXT)
+        _center_text(d, W / 2, y + 112, f"{len(rows)}개 종목 완료 · 연속 {streak}일째", tag_f, MINT)
+        y += nickname_card_h + gap
+
+        # ---- 종목 리스트(컴팩트) ----
+        list_h = compact_pad * 2 + len(shown) * row_h
+        d.rounded_rectangle([card_left, y, card_right, y + list_h], radius=24,
                              fill=CARD_BG_2, outline=BORDER, width=1)
+        ly = y + compact_pad
+        name_max_w = int(content_max_w * 0.42)
+        for idx, row in enumerate(shown):
+            is_cardio = row["type"] == "cardio"
+            badge_color = MINT if is_cardio else ACCENT
+            row_cy = ly + row_h / 2
 
-        # 번호 배지
-        bcx, bcy, br = card_left + 46, y + block_h / 2, 30
-        d.ellipse([bcx - br, bcy - br, bcx + br, bcy + br], fill=badge_color)
-        num_txt = str(idx + 1)
-        nw = _text_w(d, num_txt, badge_num_f)
-        d.text((bcx - nw / 2, bcy - badge_num_f.size / 2 - 3), num_txt, font=badge_num_f, fill=(20, 18, 16))
+            bx = content_x - 60
+            d.ellipse([bx - badge_r, row_cy - badge_r, bx + badge_r, row_cy + badge_r], fill=badge_color)
+            num_txt = str(idx + 1)
+            nw = _text_w(d, num_txt, badge_f)
+            d.text((bx - nw / 2, row_cy - badge_f.size / 2 - 2), num_txt, font=badge_f, fill=(20, 18, 16))
 
-        ty = y + b["pad_top"]
-        # 종목 타입 태그 + 이름
-        type_txt = "CARDIO" if is_cardio else "STRENGTH"
-        d.text((content_x, ty + 6), type_txt, font=type_tag_f, fill=badge_color)
-        tag_w = _text_w(d, type_txt, type_tag_f)
-        d.text((content_x + tag_w + 14, ty - 5), row["exercise_name"], font=b["name_f"], fill=TEXT)
-        ty += b["name_line_h"]
+            name_txt = _fit_ellipsis(d, row["exercise_name"], name_f, name_max_w)
+            d.text((content_x, row_cy - name_f.size / 2 - 1), name_txt, font=name_f, fill=TEXT)
+            name_w = _text_w(d, name_txt, name_f)
 
-        for line in b["lines"]:
-            _draw_chip_line(d, content_x, ty, line, b["c_f"], b["chip_h"])
-            ty += b["chip_h"] + b["line_gap"]
+            sets_x = content_x + name_w + 20
+            sets_max_w = card_right - 32 - sets_x
+            if sets_max_w > 30:
+                sets_txt = _fit_ellipsis(d, _row_summary_text(row), sets_f, sets_max_w)
+                d.text((sets_x, row_cy - sets_f.size / 2 - 1), sets_txt, font=sets_f, fill=badge_color)
 
-        if b["memo_lines"]:
-            ty += b["memo_gap"] - b["line_gap"]
-            for ml in b["memo_lines"]:
-                d.text((content_x, ty), ml, font=b["memo_f"], fill=SUB)
-                ty += b["memo_line_h"]
+            if idx < len(shown) - 1:
+                d.line([(card_left + 24, ly + row_h), (card_right - 24, ly + row_h)], fill=BORDER, width=1)
+            ly += row_h
 
-        y += block_h + 18
+        y += list_h
+        if has_more:
+            remaining = len(rows) - len(shown)
+            _center_text(d, W / 2, y + 8, f"+ {remaining}개 종목 더", more_f, SUB)
+            y += 44
+        y += gap
 
-    remaining = len(rows) - len(shown)
-    if remaining > 0:
-        _center_text(d, W / 2, y + 4, f"+ {remaining}개 종목 더", more_f, SUB)
-        y += more_line_h
-    y += gap
+    else:
+        # =========================================================
+        # 카드 모드 렌더링
+        # =========================================================
+        content_h = card_total_h(card_blocks, False)
+        start_y = header_bottom + max(10, (available - content_h) / 2)
+        if start_y + content_h > H - bottom_reserved:
+            start_y = max(header_bottom + 10, H - bottom_reserved - content_h)
+        y = start_y
+
+        # ---- 닉네임 카드 ----
+        d.rounded_rectangle([card_left, y, card_right, y + nickname_card_h], radius=28,
+                             fill=CARD_BG, outline=BORDER, width=2)
+        d.rounded_rectangle([card_left, y, card_left + 10, y + nickname_card_h], radius=5, fill=ACCENT)
+        _center_text(d, W / 2, y + 32, f"{nickname} 님의 오늘 🔥", nickname_f, TEXT)
+        _center_text(d, W / 2, y + 112, f"{len(rows)}개 종목 완료 · 연속 {streak}일째", tag_f, MINT)
+        y += nickname_card_h + gap
+
+        for idx, b in enumerate(card_blocks):
+            row = b["row"]
+            block_h = b["h"]
+            is_cardio = row["type"] == "cardio"
+            badge_color = MINT if is_cardio else ACCENT
+
+            d.rounded_rectangle([card_left, y, card_right, y + block_h], radius=22,
+                                 fill=CARD_BG_2, outline=BORDER, width=1)
+
+            bcx, bcy, br = card_left + 46, y + block_h / 2, 30
+            d.ellipse([bcx - br, bcy - br, bcx + br, bcy + br], fill=badge_color)
+            num_txt = str(idx + 1)
+            nw = _text_w(d, num_txt, badge_num_f)
+            d.text((bcx - nw / 2, bcy - badge_num_f.size / 2 - 3), num_txt, font=badge_num_f, fill=(20, 18, 16))
+
+            ty = y + b["pad_top"]
+            type_txt = "CARDIO" if is_cardio else "STRENGTH"
+            d.text((content_x, ty + 6), type_txt, font=type_tag_f, fill=badge_color)
+            tag_w = _text_w(d, type_txt, type_tag_f)
+            d.text((content_x + tag_w + 14, ty - 5), row["exercise_name"], font=b["name_f"], fill=TEXT)
+            ty += b["name_line_h"]
+
+            for line in b["lines"]:
+                _draw_chip_line(d, content_x, ty, line, b["c_f"], b["chip_h"])
+                ty += b["chip_h"] + b["line_gap"]
+
+            if b["memo_lines"]:
+                ty += b["memo_gap"] - b["line_gap"]
+                for ml in b["memo_lines"]:
+                    d.text((content_x, ty), ml, font=b["memo_f"], fill=SUB)
+                    ty += b["memo_line_h"]
+
+            y += block_h + 18
+
+        y += gap
 
     # ---- 하단 통계 카드 ----
     footer_y = y
