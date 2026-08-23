@@ -802,22 +802,42 @@ def get_workout_dates(user_id: str) -> set:
 # ================= 오운완 인증카드용 날짜 요약 =================
 
 def get_date_summary(user_id: str, date_str: str):
-    """해당 날짜에 기록한 운동들의 (운동명, 최고세트) 목록 + 그 날의 총 볼륨.
-    반환: (rows, total_volume) — rows = [{"exercise_name","weight","reps"}], 기록 없으면 ([], 0.0)"""
+    """해당 날짜에 기록한 운동 전체(근력 + 유산소) 요약 + 그 날의 총 볼륨.
+
+    반환: (rows, total_volume)
+    rows = [
+        {"type": "strength", "exercise_name": str, "sets": [{"weight": float, "reps": int}, ...]},
+        {"type": "cardio", "exercise_name": str, "duration_min": float|None,
+         "distance_km": float|None, "calories": float|None},
+    ]
+    기록 없으면 ([], 0.0). 근력은 세트를 지운 최고기록 하나가 아니라 그날 친 세트 전부를 담는다.
+    """
     docs = list(get_db().logs.find({"user_id": user_id, "date": date_str}))
     rows = []
     total_volume = 0.0
     for d in docs:
-        best = _best_from_sets(d["sets"])
+        sets = []
         for s in d["sets"]:
             try:
-                total_volume += float(s["w"]) * int(s["r"])
+                w = float(s["w"])
+                r = int(s["r"])
             except (KeyError, TypeError, ValueError):
                 continue
-        if best is None:
+            sets.append({"weight": w, "reps": r})
+            total_volume += w * r
+        if not sets:
             continue
-        w, r = best
-        rows.append({"exercise_name": d["exercise_name"], "weight": w, "reps": r})
+        rows.append({"type": "strength", "exercise_name": d["exercise_name"], "sets": sets})
+
+    cardio_docs = list(get_db().cardio_logs.find({"user_id": user_id, "date": date_str}))
+    for d in cardio_docs:
+        rows.append({
+            "type": "cardio",
+            "exercise_name": d["exercise_name"],
+            "duration_min": d.get("duration_min"),
+            "distance_km": d.get("distance_km"),
+            "calories": d.get("calories"),
+        })
     return rows, total_volume
 
 
