@@ -2,7 +2,7 @@
 """
 헬린이 루틴 - 메인 엔트리 파일 (Streamlit 앱의 시작점).
 
-이 앱은 서로 다른 화면(오늘의 루틴 / 마이페이지 / 랭킹 / 문의 / 관리자 / 인증샷 피드)을
+이 앱은 서로 다른 화면(오늘의 루틴 / 마이페이지 / 랭킹 / 문의 / 관리자 / 게시판)을
 별도의 pages/*.py 파일로 나누지 않고, 이 파일 하나에서 st.session_state["page"] 값에 따라
 render_xxx() 함수를 골라 호출하는 방식(SPA처럼 동작)으로 화면을 전환한다.
 자세한 이유는 README의 "화면 이동 방식" 섹션 참고.
@@ -18,7 +18,7 @@ render_xxx() 함수를 골라 호출하는 방식(SPA처럼 동작)으로 화면
   8) 랭킹 (render_ranking)
   9) 문의하기 (render_contact)
   10) 관리자 페이지 (render_admin)
-  11) 인증샷 게시판 (render_feed)
+  11) 게시판 - 자유/운동/정보/인증샷 (render_board)
   12) 파일 맨 아래: 실제 라우팅(현재 로그인 여부·페이지 값에 따라 위 함수 중 하나를 호출)
 
 실제 데이터베이스 로직은 utils/db.py, 화면 조각 UI는 utils/ui.py,
@@ -429,7 +429,7 @@ def render_auth():
 NAV_PAGES = [
     ("today", "🏠 오늘"),
     ("mypage", "📖 기록"),
-    ("feed", "📸 인증"),
+    ("board", "📋 게시판"),
     ("ranking", "🏆 랭킹"),
     ("contact", "💬 문의"),
 ]
@@ -1274,90 +1274,282 @@ def render_admin(user: dict):
                         st.rerun()
 
 
-# ================= 인증샷 게시판 =================
-def render_feed(user: dict):
-    """인증샷 게시판 페이지. 사진 업로드/수정, 다른 사람들의 피드 열람, 댓글과 리액션 기능을 제공한다."""
-    st.subheader("📸 인증샷 게시판")
-    st.caption("오늘 운동한 인증샷을 올리고, 서로 댓글과 리액션으로 응원해줘요.")
+# ================= 게시판 (자유 / 운동 / 정보 / 인증샷) =================
+# 목록에서는 게시판별 글 제목만 보이고, 클릭해서 상세로 들어가야 사진/본문/댓글을 볼 수 있다.
+# st.session_state["board_view"]로 목록(list) / 글쓰기(write) / 상세(detail) / 수정(edit) 화면을 전환한다.
 
-    today_str = today_kst().isoformat()
-    existing = db.get_post_by_user_date(user["id"], today_str)
-
-    with st.expander("📷 오늘 인증샷 올리기 / 수정하기", expanded=existing is None):
-        if existing and existing.get("photo_b64"):
-            st.image(base64.b64decode(existing["photo_b64"]), width=220, caption="현재 등록된 사진")
-        with st.form("post_form", clear_on_submit=False):
-            photo = st.file_uploader("사진 선택 (jpg/png)", type=["jpg", "jpeg", "png"], key="post_photo")
-            caption = st.text_area(
-                "한마디",
-                value=existing.get("caption", "") if existing else "",
-                placeholder="오늘 하체데이 죽는 줄... 다들 화이팅!",
-                key="post_caption",
-            )
-            submitted = st.form_submit_button("게시하기", use_container_width=True)
-        if submitted:
-            if not photo and not existing:
-                st.error("사진을 선택해주세요.")
-            else:
-                photo_bytes = photo.read() if photo else None
-                db.create_or_update_post(user["id"], user["nickname"], today_str, photo_bytes, caption)
-                st.toast("인증샷을 올렸어요!", icon="📸")
-                st.rerun()
-
-    st.divider()
-    posts = db.get_feed_posts(limit=50)
-    if not posts:
-        st.info("아직 올라온 인증샷이 없어요. 첫 인증샷의 주인공이 되어보세요!")
-        return
+def render_board(user: dict):
+    """게시판 페이지 진입점. 화면 상태에 따라 목록/글쓰기/상세/수정 중 하나를 그린다."""
+    st.session_state.setdefault("board_view", "list")
+    st.session_state.setdefault("board_category", "all")
+    st.session_state.setdefault("board_post_id", None)
 
     is_admin = db.is_admin(user["username"])
+    view = st.session_state["board_view"]
+
+    if view == "write":
+        _render_board_write(user)
+    elif view == "edit" and st.session_state["board_post_id"]:
+        _render_board_edit(user, is_admin)
+    elif view == "detail" and st.session_state["board_post_id"]:
+        _render_board_detail(user, is_admin)
+    else:
+        st.session_state["board_view"] = "list"
+        _render_board_list(user, is_admin)
+
+
+def _render_board_list(user: dict, is_admin: bool):
+    """게시판 목록 화면. 게시판 종류 선택 + 검색 + 글쓰기 버튼 + 제목 목록."""
+    st.subheader("📋 게시판")
+    st.caption("자유롭게 이야기하고, 운동 정보도 나누고, 인증샷도 올려보세요.")
+
+    counts = db.get_board_category_counts()
+    total = sum(counts.values())
+    cat_options = ["all"] + db.BOARD_CATEGORY_KEYS
+
+    def _cat_label(k: str) -> str:
+        if k == "all":
+            return f"🗂️ 전체({total})"
+        return f"{db.BOARD_CATEGORY_ICON[k]} {db.BOARD_CATEGORY_NAME[k]}({counts.get(k, 0)})"
+
+    chunk = 3
+    for i in range(0, len(cat_options), chunk):
+        row = cat_options[i:i + chunk]
+        with st.container(key=f"evenrow_boardcat_{i}"):
+            cols = st.columns(len(row))
+            for col, key in zip(cols, row):
+                btn_type = "primary" if st.session_state["board_category"] == key else "secondary"
+                if col.button(_cat_label(key), key=f"boardcat_{key}", use_container_width=True, type=btn_type):
+                    st.session_state["board_category"] = key
+                    st.rerun()
+
+    with st.container(key="evenrow_boardtools"):
+        s1, s2 = st.columns([3, 1])
+        search = s1.text_input(
+            "검색", key="board_search", placeholder="🔍 제목/내용/작성자 검색",
+            label_visibility="collapsed",
+        )
+        if s2.button("✏️ 글쓰기", key="board_write_btn", use_container_width=True, type="primary"):
+            st.session_state["board_view"] = "write"
+            st.rerun()
+
+    st.divider()
+
+    category = st.session_state["board_category"]
+    posts = db.get_posts(category=category, search=search, limit=100)
+
+    if not posts:
+        if search:
+            st.info("검색 결과가 없어요.")
+        else:
+            st.info("아직 글이 없어요. 첫 글의 주인공이 되어보세요!")
+        return
 
     for p in posts:
         post_id = str(p["_id"])
-        is_mine = p["user_id"] == user["id"]
-        with st.container(border=True):
-            mine_tag = " · 나" if is_mine else ""
-            st.markdown(f"**{p['nickname']}**{mine_tag} · {p['date']}")
-            if p.get("photo_b64"):
-                st.image(base64.b64decode(p["photo_b64"]), use_container_width=True)
-            if p.get("caption"):
-                st.markdown(p["caption"])
+        cat = p.get("category", "cert")
+        title = p.get("title") or p.get("caption") or "(제목 없음)"
+        comment_count = len(p.get("comments", []))
+        reaction_count = sum(len(v) for v in p.get("reactions", {}).values())
+        photo_tag = " 📷" if p.get("photo_b64") else ""
+        created = p.get("created_at")
+        date_txt = created.strftime("%m/%d %H:%M") if created else p.get("date", "")
+        mine_tag = " · 나" if p.get("user_id") == user["id"] else ""
 
-            reactions = p.get("reactions", {})
-            with st.container(key=f"evenrow_react_{post_id}"):
-                cols = st.columns(len(db.REACTION_EMOJIS))
-                for emoji, rcol in zip(db.REACTION_EMOJIS, cols):
-                    users = reactions.get(emoji, [])
-                    reacted = user["id"] in users
-                    label = f"{emoji} {len(users)}" if users else emoji
-                    if rcol.button(label, key=f"react_{emoji}_{post_id}", use_container_width=True, type="primary" if reacted else "secondary"):
-                        db.toggle_reaction(p["_id"], user["id"], emoji)
-                        st.rerun()
+        with st.container(border=True, key=f"boardrow_{post_id}"):
+            icon = db.BOARD_CATEGORY_ICON.get(cat, "📌")
+            if st.button(f"{icon} {title}{photo_tag}", key=f"boardopen_{post_id}", use_container_width=True):
+                st.session_state["board_view"] = "detail"
+                st.session_state["board_post_id"] = post_id
+                st.rerun()
+            st.caption(
+                f"{db.BOARD_CATEGORY_NAME.get(cat, '게시판')} · {p.get('nickname', '')}{mine_tag} · "
+                f"{date_txt} · 💬 {comment_count} · 👍 {reaction_count} · 조회 {p.get('views', 0)}"
+            )
 
-            comments = p.get("comments", [])
-            if comments:
-                for c in comments:
-                    with st.container(key=f"evenrow_comment_{post_id}_{c['_id']}"):
-                        cc1, cc2 = st.columns([5, 1])
-                        cc1.markdown(f"💬 **{c['nickname']}** {c['text']}")
-                        if (c.get("user_id") == user["id"] or is_admin) and cc2.button("삭제", key=f"delcm_{post_id}_{c['_id']}"):
-                            db.delete_comment(p["_id"], c["_id"], user["id"], is_admin)
-                            st.rerun()
 
-            with st.form(f"comment_form_{post_id}", clear_on_submit=True):
-                with st.container(key=f"evenrow_commentinput_{post_id}"):
-                    cco1, cco2 = st.columns([4, 1])
-                    comment_text = cco1.text_input("댓글", key=f"comment_{post_id}", placeholder="댓글 달기", label_visibility="collapsed")
-                    comment_submitted = cco2.form_submit_button("등록", use_container_width=True)
-            if comment_submitted and comment_text.strip():
-                db.add_comment(p["_id"], user["id"], user["nickname"], comment_text)
+def _render_board_write(user: dict):
+    """새 글쓰기 화면."""
+    st.subheader("✏️ 새 글쓰기")
+    if st.button("← 목록으로", key="board_write_back"):
+        st.session_state["board_view"] = "list"
+        st.rerun()
+
+    default_cat = st.session_state.get("board_category")
+    if default_cat not in db.BOARD_CATEGORY_KEYS:
+        default_cat = db.DEFAULT_BOARD_CATEGORY
+    cat_labels = [db.BOARD_CATEGORY_LABEL[k] for k in db.BOARD_CATEGORY_KEYS]
+
+    with st.form("board_write_form", clear_on_submit=False):
+        cat_choice = st.selectbox(
+            "게시판 선택", cat_labels,
+            index=db.BOARD_CATEGORY_KEYS.index(default_cat), key="board_new_cat",
+        )
+        title = st.text_input("제목", key="board_new_title", placeholder="제목을 입력하세요")
+        content = st.text_area(
+            "내용", key="board_new_content", placeholder="내용을 입력하세요",
+            height=180,
+        )
+        photo = st.file_uploader("사진 첨부 (선택, jpg/png)", type=["jpg", "jpeg", "png"], key="board_new_photo")
+        submitted = st.form_submit_button("게시하기", use_container_width=True)
+
+    if submitted:
+        if not title.strip():
+            st.error("제목을 입력해주세요.")
+        elif not content.strip() and not photo:
+            st.error("내용이나 사진 중 하나는 입력해주세요.")
+        else:
+            cat_key = db.BOARD_CATEGORY_KEYS[cat_labels.index(cat_choice)]
+            photo_bytes = photo.read() if photo else None
+            db.create_post(user["id"], user["nickname"], cat_key, title, content, photo_bytes)
+            st.toast("게시글을 올렸어요!", icon="📝")
+            for k in ("board_new_title", "board_new_content"):
+                st.session_state.pop(k, None)
+            st.session_state["board_view"] = "list"
+            st.session_state["board_category"] = cat_key
+            st.rerun()
+
+
+def _render_board_detail(user: dict, is_admin: bool):
+    """게시글 상세 화면. 제목/사진/본문/리액션/댓글을 모두 보여준다."""
+    post_id = st.session_state["board_post_id"]
+    p = db.get_post_by_id(post_id)
+
+    if not p:
+        st.warning("게시글을 찾을 수 없어요 (삭제되었을 수 있어요).")
+        if st.button("← 목록으로", key="board_detail_back_missing"):
+            st.session_state["board_view"] = "list"
+            st.session_state["board_post_id"] = None
+            st.rerun()
+        return
+
+    if st.button("← 목록으로", key="board_detail_back"):
+        st.session_state["board_view"] = "list"
+        st.session_state["board_post_id"] = None
+        st.rerun()
+
+    viewed_key = f"board_viewed_{post_id}"
+    if not st.session_state.get(viewed_key):
+        db.increment_view(post_id)
+        st.session_state[viewed_key] = True
+        p["views"] = p.get("views", 0) + 1
+
+    cat = p.get("category", "cert")
+    title = p.get("title") or p.get("caption") or "(제목 없음)"
+    is_mine = p.get("user_id") == user["id"]
+    created = p.get("created_at")
+    date_txt = created.strftime("%Y-%m-%d %H:%M") if created else p.get("date", "")
+
+    st.markdown(f"#### {db.BOARD_CATEGORY_ICON.get(cat, '📌')} {title}")
+    mine_tag = " · 나" if is_mine else ""
+    st.caption(
+        f"{db.BOARD_CATEGORY_NAME.get(cat, '게시판')} · {p.get('nickname', '')}{mine_tag} · "
+        f"{date_txt} · 조회 {p.get('views', 0)}"
+    )
+
+    if p.get("photo_b64"):
+        st.image(base64.b64decode(p["photo_b64"]), use_container_width=True)
+    content = p.get("content") or p.get("caption") or ""
+    if content:
+        st.markdown(content)
+
+    st.divider()
+
+    reactions = p.get("reactions", {})
+    with st.container(key=f"evenrow_react_{post_id}"):
+        cols = st.columns(len(db.REACTION_EMOJIS))
+        for emoji, rcol in zip(db.REACTION_EMOJIS, cols):
+            users = reactions.get(emoji, [])
+            reacted = user["id"] in users
+            label = f"{emoji} {len(users)}" if users else emoji
+            if rcol.button(label, key=f"react_{emoji}_{post_id}", use_container_width=True, type="primary" if reacted else "secondary"):
+                db.toggle_reaction(p["_id"], user["id"], emoji)
                 st.rerun()
 
-            if is_mine or is_admin:
-                if st.button("🗑️ 게시물 삭제", key=f"delpost_{post_id}"):
-                    db.delete_post(p["_id"], user["id"], is_admin)
-                    st.toast("삭제했어요.", icon="🗑️")
-                    st.rerun()
+    if is_mine or is_admin:
+        with st.container(key=f"evenrow_postactions_{post_id}"):
+            c1, c2 = st.columns(2)
+            if c1.button("✏️ 수정", key=f"editpost_{post_id}", use_container_width=True):
+                st.session_state["board_view"] = "edit"
+                st.rerun()
+            if c2.button("🗑️ 삭제", key=f"delpost_{post_id}", use_container_width=True):
+                db.delete_post(p["_id"], user["id"], is_admin)
+                st.toast("삭제했어요.", icon="🗑️")
+                st.session_state["board_view"] = "list"
+                st.session_state["board_post_id"] = None
+                st.rerun()
+
+    st.divider()
+    comments = p.get("comments", [])
+    st.markdown(f"**댓글 {len(comments)}**")
+    for c in comments:
+        with st.container(key=f"evenrow_comment_{post_id}_{c['_id']}"):
+            cc1, cc2 = st.columns([5, 1])
+            cc1.markdown(f"💬 **{c['nickname']}** {c['text']}")
+            if (c.get("user_id") == user["id"] or is_admin) and cc2.button("삭제", key=f"delcm_{post_id}_{c['_id']}"):
+                db.delete_comment(p["_id"], c["_id"], user["id"], is_admin)
+                st.rerun()
+
+    with st.form(f"comment_form_{post_id}", clear_on_submit=True):
+        with st.container(key=f"evenrow_commentinput_{post_id}"):
+            cco1, cco2 = st.columns([4, 1])
+            comment_text = cco1.text_input("댓글", key=f"comment_{post_id}", placeholder="댓글 달기", label_visibility="collapsed")
+            comment_submitted = cco2.form_submit_button("등록", use_container_width=True)
+    if comment_submitted and comment_text.strip():
+        db.add_comment(p["_id"], user["id"], user["nickname"], comment_text)
+        st.rerun()
+
+
+def _render_board_edit(user: dict, is_admin: bool):
+    """게시글 수정 화면 (작성자 본인 또는 관리자만 진입 가능)."""
+    post_id = st.session_state["board_post_id"]
+    p = db.get_post_by_id(post_id)
+
+    if not p:
+        st.warning("게시글을 찾을 수 없어요.")
+        st.session_state["board_view"] = "list"
+        st.session_state["board_post_id"] = None
+        return
+
+    is_mine = p.get("user_id") == user["id"]
+    if not (is_mine or is_admin):
+        st.error("수정 권한이 없어요.")
+        st.session_state["board_view"] = "detail"
+        return
+
+    st.subheader("✏️ 글 수정")
+    if st.button("← 취소", key="board_edit_cancel"):
+        st.session_state["board_view"] = "detail"
+        st.rerun()
+
+    remove_photo = False
+    if p.get("photo_b64"):
+        st.image(base64.b64decode(p["photo_b64"]), width=220, caption="현재 사진")
+        remove_photo = st.checkbox("사진 삭제", key=f"remove_photo_{post_id}")
+
+    with st.form(f"board_edit_form_{post_id}"):
+        title = st.text_input(
+            "제목", value=p.get("title") or p.get("caption") or "", key=f"edit_title_{post_id}",
+        )
+        content = st.text_area(
+            "내용", value=p.get("content") or p.get("caption") or "", height=180,
+            key=f"edit_content_{post_id}",
+        )
+        photo = st.file_uploader("사진 교체 (선택)", type=["jpg", "jpeg", "png"], key=f"edit_photo_{post_id}")
+        submitted = st.form_submit_button("수정 완료", use_container_width=True)
+
+    if submitted:
+        if not title.strip():
+            st.error("제목을 입력해주세요.")
+        else:
+            photo_bytes = photo.read() if photo else None
+            db.update_post(
+                post_id, user["id"], is_admin,
+                title=title, content=content, file_bytes=photo_bytes, remove_photo=remove_photo,
+            )
+            st.toast("수정했어요.", icon="✏️")
+            st.session_state["board_view"] = "detail"
+            st.rerun()
 
 
 # ================= 라우팅 =================
@@ -1373,8 +1565,8 @@ else:
 
     if _page == "mypage":
         render_mypage(_user)
-    elif _page == "feed":
-        render_feed(_user)
+    elif _page == "board":
+        render_board(_user)
     elif _page == "ranking":
         render_ranking(_user)
     elif _page == "contact":

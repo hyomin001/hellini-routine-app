@@ -183,6 +183,23 @@ div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] > div[data-tes
 div[class*="st-key-setrow_"] div[data-testid="stHorizontalBlock"] > div[data-testid="column"] * {
     min-width: 0 !important;
 }
+
+/* ===== 공용 규칙 3: 게시판 목록 행(st.container(key=f"boardrow_..."))의 제목 버튼은
+   가운데 정렬 버튼이 아니라 왼쪽 정렬 "글 제목"처럼 보이게 스타일을 바꾼다. ===== */
+div[class*="st-key-boardrow_"] .stButton > button {
+    text-align: left !important;
+    justify-content: flex-start !important;
+    font-weight: 600;
+    font-size: 15px !important;
+    padding: 4px 2px !important;
+    min-height: auto !important;
+    border: none !important;
+    background: transparent !important;
+}
+div[class*="st-key-boardrow_"] .stButton > button:hover {
+    color: #ff4b4b !important;
+    text-decoration: underline;
+}
 </style>
 """
 

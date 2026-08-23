@@ -60,8 +60,34 @@ def init_indexes():
     db.inquiries.create_index([("created_at", DESCENDING)])
     db.presence.create_index("user_id", unique=True)
     db.presence.create_index("last_seen")
-    db.posts.create_index([("user_id", ASCENDING), ("date", ASCENDING)], unique=True)
+
+    # ---- 게시판 스키마 변경 (v2) ----
+    # 예전에는 "하루 1인 1게시글(인증샷)" 구조라 (user_id, date) 유니크 인덱스가 있었지만,
+    # 이제는 자유/운동/정보/인증샷 등 여러 게시판에 자유롭게 여러 글을 쓸 수 있게 바뀌어서
+    # 더 이상 유니크 제약이 맞지 않는다. 예전에 이미 생성된 인덱스가 남아있으면 새 글 작성이
+    # 막혀버리므로, 있으면 지우고 새 인덱스 구성으로 교체한다.
+    try:
+        db.posts.drop_index("user_id_1_date_1")
+    except Exception:
+        pass
+    db.posts.create_index([("category", ASCENDING), ("created_at", DESCENDING)])
     db.posts.create_index([("created_at", DESCENDING)])
+
+    # 예전 인증샷 게시글(카테고리/제목 필드가 없는 문서)을 새 스키마로 한 번만 이관.
+    # 이미 이관된 문서는 category 필드가 있어서 조건에 안 걸리므로 매번 실행돼도 비용이 거의 없다.
+    db.posts.update_many(
+        {"category": {"$exists": False}},
+        [
+            {
+                "$set": {
+                    "category": "cert",
+                    "title": {"$ifNull": ["$caption", "인증샷"]},
+                    "content": {"$ifNull": ["$caption", ""]},
+                    "views": {"$ifNull": ["$views", 0]},
+                }
+            }
+        ],
+    )
 
 
 # ================= USERS =================
@@ -896,7 +922,22 @@ def get_badges(user_id: str, nickname: str, today_str: str, all_exercise_count: 
     return [dict(b, achieved=achieved.get(b["id"], False)) for b in BADGE_DEFS]
 
 
-# ================= 인증샷 게시판 =================
+# ================= 커뮤니티 게시판 =================
+# 예전에는 "인증샷 게시판" 하나뿐이었지만(하루 1인 1게시글), 이제는 여러 종류의
+# 게시판(자유/운동/정보/인증샷)에 제목+내용(+선택적 사진)으로 자유롭게 여러 글을 쓸 수 있다.
+# 목록에서는 제목만 보이고, 클릭해서 상세로 들어가야 사진/본문을 볼 수 있는 구조.
+
+BOARD_CATEGORIES = [
+    ("free", "자유", "💬"),
+    ("workout", "운동", "💪"),
+    ("info", "정보", "📚"),
+    ("cert", "인증샷", "📸"),
+]
+BOARD_CATEGORY_KEYS = [c[0] for c in BOARD_CATEGORIES]
+BOARD_CATEGORY_NAME = {k: n for k, n, i in BOARD_CATEGORIES}
+BOARD_CATEGORY_ICON = {k: i for k, n, i in BOARD_CATEGORIES}
+BOARD_CATEGORY_LABEL = {k: f"{i} {n}게시판" for k, n, i in BOARD_CATEGORIES}
+DEFAULT_BOARD_CATEGORY = "free"
 
 REACTION_EMOJIS = ["🔥", "💪", "👏"]
 MAX_PHOTO_WIDTH = 1000
@@ -916,31 +957,85 @@ def compress_photo_to_b64(file_bytes: bytes) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def create_or_update_post(user_id: str, nickname: str, date_str: str, file_bytes: Optional[bytes], caption: str):
-    """오늘 인증샷을 올리거나(같은 날짜에 이미 있으면) 캡션/사진을 수정한다."""
-    db = get_db()
-    update = {"nickname": nickname, "caption": (caption or "").strip(), "updated_at": datetime.utcnow()}
+def create_post(user_id: str, nickname: str, category: str, title: str, content: str,
+                 file_bytes: Optional[bytes] = None):
+    """새 게시글을 작성한다 (자유/운동/정보/인증샷 게시판 공통)."""
+    if category not in BOARD_CATEGORY_KEYS:
+        category = DEFAULT_BOARD_CATEGORY
+    now = datetime.utcnow()
+    doc = {
+        "user_id": user_id,
+        "nickname": nickname,
+        "category": category,
+        "title": (title or "").strip() or "(제목 없음)",
+        "content": (content or "").strip(),
+        "created_at": now,
+        "updated_at": now,
+        "comments": [],
+        "reactions": {},
+        "views": 0,
+    }
+    if file_bytes:
+        doc["photo_b64"] = compress_photo_to_b64(file_bytes)
+    result = get_db().posts.insert_one(doc)
+    return result.inserted_id
+
+
+def update_post(post_id, user_id: str, is_admin: bool = False, title: Optional[str] = None,
+                 content: Optional[str] = None, file_bytes: Optional[bytes] = None,
+                 remove_photo: bool = False) -> bool:
+    """게시글을 수정한다 (작성자 본인 또는 관리자만 가능)."""
+    database = get_db()
+    q = {"_id": ObjectId(post_id)}
+    if not is_admin:
+        q["user_id"] = user_id
+    update = {"updated_at": datetime.utcnow()}
+    if title is not None:
+        update["title"] = title.strip() or "(제목 없음)"
+    if content is not None:
+        update["content"] = content.strip()
     if file_bytes:
         update["photo_b64"] = compress_photo_to_b64(file_bytes)
-    db.posts.update_one(
-        {"user_id": user_id, "date": date_str},
-        {
-            "$set": update,
-            "$setOnInsert": {"created_at": datetime.utcnow(), "comments": [], "reactions": {}},
-        },
-        upsert=True,
-    )
-    return True, "인증샷을 올렸어요!"
+    op = {"$set": update}
+    if remove_photo and not file_bytes:
+        op["$unset"] = {"photo_b64": ""}
+    result = database.posts.update_one(q, op)
+    return result.matched_count > 0
 
 
-def get_feed_posts(limit: int = 50) -> list:
-    """최근 인증샷 게시글 목록을 최신순으로 조회한다."""
-    return list(get_db().posts.find().sort("created_at", DESCENDING).limit(limit))
+def get_posts(category: Optional[str] = None, search: Optional[str] = None, limit: int = 100) -> list:
+    """게시판 글 목록을 최신순으로 조회한다. category가 None/'all'이면 전체 게시판 통합."""
+    import re
+    q = {}
+    if category and category != "all":
+        q["category"] = category
+    search = (search or "").strip()
+    if search:
+        pattern = re.compile(re.escape(search), re.IGNORECASE)
+        q["$or"] = [{"title": pattern}, {"content": pattern}, {"nickname": pattern}]
+    return list(get_db().posts.find(q).sort("created_at", DESCENDING).limit(limit))
 
 
-def get_post_by_user_date(user_id: str, date_str: str) -> Optional[dict]:
-    """특정 사용자가 특정 날짜에 올린 게시글을 조회한다."""
-    return get_db().posts.find_one({"user_id": user_id, "date": date_str})
+def get_post_by_id(post_id) -> Optional[dict]:
+    """게시글 하나를 id로 조회한다."""
+    try:
+        return get_db().posts.find_one({"_id": ObjectId(post_id)})
+    except Exception:
+        return None
+
+
+def increment_view(post_id):
+    """게시글 조회수를 1 올린다."""
+    try:
+        get_db().posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"views": 1}})
+    except Exception:
+        pass
+
+
+def get_board_category_counts() -> dict:
+    """게시판(카테고리)별 게시글 개수를 반환한다."""
+    pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
+    return {row["_id"]: row["count"] for row in get_db().posts.aggregate(pipeline)}
 
 
 def delete_post(post_id, user_id: str, is_admin: bool = False):
