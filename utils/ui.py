@@ -57,7 +57,14 @@ BASE_CSS = """
     button[data-baseweb="tab"] {
         font-size: 12.5px !important;
         padding: 8px 10px !important;
+        flex-shrink: 0 !important;
     }
+    div[data-baseweb="tab-list"] {
+        overflow-x: auto !important;
+        scrollbar-width: none !important;
+        scroll-behavior: smooth;
+    }
+    div[data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
 }
 
 /* ===== 일반 컬럼은 화면 폭에 맞게 줄어들고, 모바일에서는 세로로 쌓인다. =====

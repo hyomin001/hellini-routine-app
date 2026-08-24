@@ -43,6 +43,17 @@ class FeatureDatabaseTests(unittest.TestCase):
         self.assertIn("하나 이상", message)
         get_db.assert_not_called()
 
+    def test_body_fat_percentage_rejects_values_over_100(self):
+        with patch.object(db, "get_db") as get_db:
+            ok, _ = db.save_body_metric("user-1", "2026-08-24", body_fat=101)
+        self.assertFalse(ok)
+        get_db.assert_not_called()
+
+    def test_set_validation_rejects_zero_reps(self):
+        ok, message = db.validate_sets([{"w": "0", "r": "0"}])
+        self.assertFalse(ok)
+        self.assertIn("1 이상", message)
+
     def test_part_catalog_keeps_base_and_adds_custom_exercise(self):
         custom = {
             "name": "내 가슴 운동",
@@ -66,6 +77,20 @@ class FeatureDatabaseTests(unittest.TestCase):
         with patch.object(db, "get_exercise_catalog", return_value=[disabled]):
             rows = db.get_exercises_for_part_catalog("user-1", "PART1")
         self.assertNotIn(base["name"], [row["name"] for row in rows])
+
+    def test_champions_are_computed_with_single_log_query(self):
+        user_oid = ObjectId()
+        database = SimpleNamespace(logs=MagicMock(), users=MagicMock())
+        database.logs.find.return_value = [
+            {"exercise_name": "스쿼트", "user_id": str(user_oid), "date": "2026-08-23", "sets": [{"w": 80, "r": 5}]},
+            {"exercise_name": "스쿼트", "user_id": str(user_oid), "date": "2026-08-24", "sets": [{"w": 90, "r": 3}]},
+        ]
+        database.users.find.return_value = [{"_id": user_oid, "nickname": "테스터"}]
+        with patch.object(db, "get_db", return_value=database):
+            rows = db.get_champions(["스쿼트", "벤치프레스"])
+        self.assertEqual(rows["스쿼트"]["weight"], 90)
+        self.assertEqual(rows["스쿼트"]["nickname"], "테스터")
+        database.logs.find.assert_called_once()
 
 
 if __name__ == "__main__":

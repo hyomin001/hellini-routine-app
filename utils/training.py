@@ -76,13 +76,24 @@ def estimate_one_rep_max(weight: float, reps: int) -> float:
     return weight * (1 + reps / 30.0)
 
 
-def progression_recommendation(previous_sets: Iterable[dict], target_reps: int, increment: float = 2.5) -> dict:
+def progression_recommendation(
+    previous_sets: Iterable[dict],
+    target_reps: int,
+    increment: float = 2.5,
+    expected_sets: Optional[int] = None,
+) -> dict:
     """직전 기록과 목표 횟수를 비교해 다음 운동 제안을 만든다."""
     rows = valid_sets(previous_sets)
     target = parse_target_reps(target_reps)
     if not rows:
         return {"ready": False, "suggested_weight": None, "message": "첫 기록을 남기면 다음 중량을 추천해드려요."}
     max_weight = max(w for w, _ in rows)
+    if expected_sets and len(rows) < int(expected_sets):
+        return {
+            "ready": False,
+            "suggested_weight": max_weight,
+            "message": f"먼저 계획한 {int(expected_sets)}세트를 모두 기록해보세요.",
+        }
     all_hit = all(r >= target for _, r in rows)
     if all_hit and max_weight > 0:
         suggested = round((max_weight + increment) * 2) / 2

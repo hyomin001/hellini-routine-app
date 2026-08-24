@@ -38,6 +38,11 @@ class TrainingLogicTests(unittest.TestCase):
         self.assertFalse(result["ready"])
         self.assertEqual(result["suggested_weight"], 40)
 
+    def test_progression_requires_all_planned_sets(self):
+        result = progression_recommendation([{"w": "40", "r": "10"}], 10, expected_sets=3)
+        self.assertFalse(result["ready"])
+        self.assertIn("3세트", result["message"])
+
     def test_estimated_one_rep_max(self):
         self.assertAlmostEqual(estimate_one_rep_max(60, 10), 80.0)
 

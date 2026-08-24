@@ -539,13 +539,44 @@ def get_my_volume_rank(user_id: str) -> Optional[int]:
 
 
 def get_champions(exercise_names: list) -> dict:
-    """운동명 -> 그 운동 1위(최고 무게, 동률이면 최고 횟수) 기록. 기록 없는 운동은 제외."""
-    result = {}
-    for name in exercise_names:
-        top = get_leaderboard(name, limit=1)
-        if top:
-            result[name] = top[0]
-    return result
+    """운동별 1위를 한 번의 기록 조회와 한 번의 회원 조회로 계산한다."""
+    names = list(dict.fromkeys(exercise_names or []))
+    if not names:
+        return {}
+    database = get_db()
+    best_by_exercise = {}
+    for doc in database.logs.find(
+        {"exercise_name": {"$in": names}},
+        {"exercise_name": 1, "user_id": 1, "date": 1, "sets": 1},
+    ):
+        best = _best_from_sets(doc.get("sets", []))
+        if best is None:
+            continue
+        weight, reps = best
+        name = doc["exercise_name"]
+        current = best_by_exercise.get(name)
+        candidate = {
+            "weight": weight,
+            "reps": reps,
+            "date": doc.get("date", ""),
+            "user_id": doc["user_id"],
+        }
+        if current is None or weight > current["weight"] or (
+            weight == current["weight"] and reps > current["reps"]
+        ):
+            best_by_exercise[name] = candidate
+
+    user_ids = []
+    for uid in {row["user_id"] for row in best_by_exercise.values()}:
+        try:
+            user_ids.append(ObjectId(uid))
+        except Exception:
+            pass
+    users = {str(row["_id"]): row["nickname"] for row in database.users.find({"_id": {"$in": user_ids}})}
+    return {
+        name: {**record, "nickname": users.get(record["user_id"], "알수없음")}
+        for name, record in best_by_exercise.items()
+    }
 
 
 # ================= INQUIRIES =================
@@ -608,8 +639,8 @@ def validate_sets(sets: list):
             ri = int(r)
         except (TypeError, ValueError):
             return False, f"{i}세트: 무게/횟수는 숫자로 입력해주세요."
-        if wf < 0 or ri < 0:
-            return False, f"{i}세트: 무게/횟수는 0 이상이어야 해요."
+        if wf < 0 or ri <= 0:
+            return False, f"{i}세트: 무게는 0 이상, 횟수는 1 이상이어야 해요."
     return True, ""
 
 
@@ -1225,7 +1256,8 @@ def save_body_metric(user_id: str, date_str: str, weight=None, muscle_mass=None,
             number = float(value)
         except (TypeError, ValueError):
             return False, "체형 수치는 숫자로 입력해주세요."
-        if number <= 0 or number > 500:
+        maximum = 100 if key == "body_fat" else 500
+        if number <= 0 or number > maximum:
             return False, "체형 수치의 입력 범위를 확인해주세요."
         values[key] = number
     if all(values[k] is None for k in values):
@@ -1244,6 +1276,11 @@ def get_body_metrics(user_id: str, limit: int = 365) -> list:
     rows = list(get_db().body_metrics.find({"user_id": user_id}).sort("date", DESCENDING).limit(limit))
     rows.reverse()
     return rows
+
+
+def get_body_metric(user_id: str, date_str: str) -> Optional[dict]:
+    """특정 날짜의 체형 기록 하나를 반환한다."""
+    return get_db().body_metrics.find_one({"user_id": user_id, "date": date_str})
 
 
 def delete_body_metric(user_id: str, date_str: str) -> bool:
@@ -1302,13 +1339,13 @@ def get_exercise_catalog(user_id: Optional[str] = None, include_inactive: bool =
     return sorted(result, key=lambda item: (item.get("source") != "official", item.get("part", ""), item["name"]))
 
 
-def get_exercises_for_part_catalog(user_id: Optional[str], part_key: str) -> list:
+def get_exercises_for_part_catalog(user_id: Optional[str], part_key: str, catalog: Optional[list] = None) -> list:
     """Return the merged catalog for a body part while preserving JSON cross-part entries."""
     from utils.data import exercises_for_part
 
     # Inactive overrides must stay visible here so a disabled base exercise does
     # not fall back to its original JSON entry.
-    catalog = get_exercise_catalog(user_id, include_inactive=True)
+    catalog = catalog if catalog is not None else get_exercise_catalog(user_id, include_inactive=True)
     by_name = {item["name"]: item for item in catalog}
     rows = []
     seen = set()

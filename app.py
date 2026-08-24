@@ -469,6 +469,7 @@ def render_topnav(user: dict, admin: bool) -> str:
     total = db.get_total_user_count()
     active = db.get_active_user_count()
     stats = db.get_user_stats(user["id"], today_kst().isoformat())
+    st.session_state["_header_stats"] = stats
     streak_txt = f" · 🔥 연속 {stats['streak']}일" if stats["streak"] > 0 else ""
     tier = get_tier(stats["workout_days"])
     tier_txt = f" · {tier['icon']} {tier['name']}"
@@ -595,11 +596,16 @@ def render_today(user: dict):
 
     log_for_date = db.get_log_for_date(user["id"], date_str)
     pr_map = db.get_personal_records(user["id"])
+    merged_catalog = db.get_exercise_catalog(user["id"], include_inactive=True)
+    exercises_by_part = {
+        part["key"]: db.get_exercises_for_part_catalog(user["id"], part["key"], merged_catalog)
+        for part in PARTS
+    }
 
     # ---- 이 날짜의 전체(부위 1~6 합산) 진행 요약 ----
     total_all, done_all = 0, 0
     for part in PARTS:
-        for ex in db.get_exercises_for_part_catalog(user["id"], part["key"]):
+        for ex in exercises_by_part[part["key"]]:
             total_all += 1
             existing = log_for_date.get(ex["name"])
             sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(ex["sets"])]
@@ -634,16 +640,23 @@ def render_today(user: dict):
                 st.markdown(f"- {item}")
             st.markdown("")
 
-    part_labels = [f"{p['label']} · {p['part']}" for p in PARTS]
-    tab_labels = part_labels + ["🏃 유산소"]
-    tab_objs = st.tabs(tab_labels)
+    part_by_key = {part["key"]: part for part in PARTS}
+    section_options = list(part_by_key) + ["CARDIO"]
+    selected_section = st.selectbox(
+        "오늘 기록할 운동 부위",
+        section_options,
+        format_func=lambda key: "🏃 유산소" if key == "CARDIO" else f"{part_by_key[key]['label']} · {part_by_key[key]['part']}",
+        key="today_training_section",
+    )
 
     quick_pick = st.session_state.get("quick_pick", [])
     quick_filter_on = st.session_state.get("quick_filter_on", False) and bool(quick_pick)
 
-    for tab, part in zip(tab_objs[:-1], PARTS):
-        with tab:
-            all_exercises = db.get_exercises_for_part_catalog(user["id"], part["key"])
+    for part in PARTS:
+        if selected_section != part["key"]:
+            continue
+        with st.container():
+            all_exercises = exercises_by_part[part["key"]]
             exercises = (
                 [e for e in all_exercises if e["name"] in quick_pick]
                 if quick_filter_on else all_exercises
@@ -779,7 +792,7 @@ def render_today(user: dict):
                             st.toast(f"{active_ex['name']} 저장 완료!", icon="✅")
                             st.rerun()
 
-    with tab_objs[-1]:
+    if selected_section == "CARDIO":
         render_cardio_today(user, date_str)
 
 
@@ -927,7 +940,7 @@ def render_mypage(user: dict):
     st.subheader("📖 마이페이지")
     st.caption(f"{user['nickname']}님의 운동 기록")
 
-    stats = db.get_user_stats(user["id"], today_kst().isoformat())
+    stats = st.session_state.get("_header_stats") or db.get_user_stats(user["id"], today_kst().isoformat())
     with st.container(key="evenrow_mypage_stats"):
         c1, c2, c3 = st.columns(3)
         c1.metric("🔥 연속 기록", f"{stats['streak']}일")
@@ -945,11 +958,13 @@ def render_mypage(user: dict):
 
     ui.render_streak_heatmap(db.get_workout_dates(user["id"]))
 
-    tab_pr, tab_cardio_pr, tab_insights, tab_body, tab_badges, tab_history, tab_settings = st.tabs(
-        ["🏅 개인 최고기록", "🏃 유산소 기록", "📈 훈련 통계", "⚖️ 체형", "🎖️ 뱃지", "🗓️ 기록", "⚙️ 설정"]
+    record_menu = st.selectbox(
+        "기록 메뉴",
+        ["🏅 개인 최고기록", "🏃 유산소 기록", "📈 훈련 통계", "⚖️ 체형", "🎖️ 뱃지", "🗓️ 기록", "⚙️ 설정"],
+        key="mypage_section",
     )
 
-    with tab_pr:
+    if record_menu == "🏅 개인 최고기록":
         pr_map = db.get_personal_records(user["id"])
         if not pr_map:
             st.info("아직 기록이 없어요. 오늘의 루틴에서 운동을 기록해보세요!")
@@ -970,7 +985,7 @@ def render_mypage(user: dict):
                 chart_data = {h["date"]: h["weight"] for h in history}
                 st.line_chart(chart_data)
 
-    with tab_cardio_pr:
+    if record_menu == "🏃 유산소 기록":
         cardio_pr_map = db.get_cardio_personal_records(user["id"])
         if not cardio_pr_map:
             st.info("아직 유산소 기록이 없어요. '오늘' 화면 🏃 유산소 탭에서 기록해보세요!")
@@ -989,23 +1004,23 @@ def render_mypage(user: dict):
             st.dataframe(rows, use_container_width=True, hide_index=True)
             st.caption("거리가 있는 종목은 최장거리·최고페이스(가장 빠른 기록)를, 거리가 없는 종목은 최장시간을 보여줘요.")
 
-    with tab_insights:
+    if record_menu == "📈 훈련 통계":
         features_ui.render_training_insights(user, today_kst().isoformat())
 
-    with tab_body:
+    if record_menu == "⚖️ 체형":
         features_ui.render_body_metrics(user, today_kst().isoformat())
 
-    with tab_badges:
+    if record_menu == "🎖️ 뱃지":
         st.caption("꾸준함과 기록이 쌓이면 뱃지가 하나씩 열려요.")
         badges = db.get_badges(user["id"], user["nickname"], today_kst().isoformat(), len(ALL_EXERCISE_NAMES))
         earned = sum(1 for b in badges if b["achieved"])
         st.markdown(f"**{earned} / {len(badges)}개 달성**")
         ui.render_badges(badges)
 
-    with tab_history:
+    if record_menu == "🗓️ 기록":
         ui.render_history_tab(user)
 
-    with tab_settings:
+    if record_menu == "⚙️ 설정":
         ui.render_account_settings(user)
 
 
@@ -1017,9 +1032,13 @@ def render_ranking(user: dict):
 
     my_nickname = user["nickname"]
 
-    tab_champs, tab_detail, tab_volume = st.tabs(["👑 전체 종목 1위", "📋 종목별 TOP 20", "🏋️ 총 볼륨"])
+    ranking_menu = st.selectbox(
+        "랭킹 메뉴",
+        ["👑 전체 종목 1위", "📋 종목별 TOP 20", "🏋️ 총 볼륨"],
+        key="ranking_section",
+    )
 
-    with tab_champs:
+    if ranking_menu == "👑 전체 종목 1위":
         st.caption("각 운동마다 현재 최고 기록 보유자예요. 이름 옆에 뜨고 싶다면 지금 기록을 남겨보세요 🔥")
         champs = db.get_champions(ALL_EXERCISE_NAMES)
         if not champs:
@@ -1045,14 +1064,18 @@ def render_ranking(user: dict):
             if missing:
                 st.caption("아직 기록이 없는 종목: " + ", ".join(missing))
 
-    with tab_detail:
+    if ranking_menu == "📋 종목별 TOP 20":
         exercise = st.selectbox("운동 선택", ALL_EXERCISE_NAMES)
-        rows = db.get_leaderboard(exercise, limit=20)
+        all_rows = db.get_leaderboard(exercise, limit=100000)
+        rows = all_rows[:20]
 
         if not rows:
             st.info("아직 이 운동에 대한 기록이 없어요. 가장 먼저 기록을 남겨보세요!")
         else:
-            my_rank = db.get_my_exercise_rank(exercise, user["id"])
+            my_rank = next(
+                (index for index, row in enumerate(all_rows, start=1) if row.get("user_id") == user["id"]),
+                None,
+            )
             if my_rank is None:
                 st.caption("아직 이 운동 기록이 없어요.")
             elif my_rank > 20:
@@ -1074,13 +1097,17 @@ def render_ranking(user: dict):
                 )
             st.dataframe(table, use_container_width=True, hide_index=True)
 
-    with tab_volume:
+    if ranking_menu == "🏋️ 총 볼륨":
         st.caption("모든 운동의 무게×횟수를 합친 총 볼륨 순위예요. 꾸준함이 쌓이면 순위가 올라가요 💪")
-        rows = db.get_volume_leaderboard(limit=20)
+        all_rows = db.get_volume_leaderboard(limit=100000)
+        rows = all_rows[:20]
         if not rows:
             st.info("아직 기록이 없어요.")
         else:
-            my_vol_rank = db.get_my_volume_rank(user["id"])
+            my_vol_rank = next(
+                (index for index, row in enumerate(all_rows, start=1) if row.get("user_id") == user["id"]),
+                None,
+            )
             if my_vol_rank and my_vol_rank > 20:
                 st.caption(f"📍 내 순위: {my_vol_rank}위 (TOP 20 밖)")
             elif my_vol_rank:
@@ -1143,11 +1170,13 @@ def render_admin(user: dict):
     st.subheader("🛠️ 관리자 페이지")
     st.caption(f"{user['nickname']}님, 어서오세요. 여기는 운영자만 볼 수 있어요.")
 
-    tab_dash, tab_users, tab_inquiries, tab_exercises = st.tabs(
-        ["📊 대시보드", "👥 회원 관리", "💬 문의 관리", "🏋️ 운동 관리"]
+    admin_menu = st.selectbox(
+        "관리 메뉴",
+        ["📊 대시보드", "👥 회원 관리", "💬 문의 관리", "🏋️ 운동 관리"],
+        key="admin_section",
     )
 
-    with tab_dash:
+    if admin_menu == "📊 대시보드":
         stats = db.get_dashboard_stats()
 
         with st.container(key="evenrow_admin_stats"):
@@ -1194,7 +1223,7 @@ def render_admin(user: dict):
         signup_rows = db.get_signup_counts_by_day(14)
         st.bar_chart({r["날짜"]: r["가입자 수"] for r in signup_rows})
 
-    with tab_users:
+    if admin_menu == "👥 회원 관리":
         users = db.list_all_users()
         st.caption(f"총 {len(users)}명")
 
@@ -1241,7 +1270,7 @@ def render_admin(user: dict):
                             st.session_state[reset_key] = temp_pw
                             st.rerun()
 
-    with tab_inquiries:
+    if admin_menu == "💬 문의 관리":
         inquiries = db.get_inquiries(limit=500)
         st.caption(f"총 {len(inquiries)}건")
 
@@ -1288,7 +1317,7 @@ def render_admin(user: dict):
                         st.toast("답변을 저장했어요.", icon="✅")
                         st.rerun()
 
-    with tab_exercises:
+    if admin_menu == "🏋️ 운동 관리":
         features_ui.render_admin_exercise_editor()
 
 

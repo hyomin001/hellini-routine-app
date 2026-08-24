@@ -61,6 +61,7 @@ def render_today_routine_launcher(user: dict, date_str: str):
             st.caption("저장한 루틴이 없어요. 루틴 메뉴에서 자주 하는 운동을 묶어보세요.")
             if st.button("첫 루틴 만들기", use_container_width=True, key="today_make_routine"):
                 st.session_state["page"] = "routines"
+                st.session_state["routine_section"] = "➕ 루틴 만들기"
                 st.rerun()
             return
 
@@ -277,6 +278,7 @@ def _render_routine_list(user: dict, date_str: str):
                 st.rerun()
             if c1.button("수정", key=f"routine_edit_{rid}", use_container_width=True):
                 _set_builder(routine)
+                st.session_state["routine_section"] = "➕ 루틴 만들기"
                 st.rerun()
             d1, d2 = st.columns(2)
             if d1.button("복제", key=f"routine_copy_{rid}", use_container_width=True):
@@ -360,14 +362,18 @@ def _render_custom_exercises(user: dict):
 def render_routines_page(user: dict, date_str: str):
     st.subheader("🧩 나만의 루틴")
     st.caption("원하는 운동만 골라 저장하고, 지난 기록을 불러와 순서대로 운동해보세요.")
-    tab_list, tab_builder, tab_plan, tab_custom = st.tabs(["저장 루틴", "루틴 만들기", "주간 계획", "내 운동"])
-    with tab_list:
+    routine_menu = st.selectbox(
+        "루틴 메뉴",
+        ["📋 저장 루틴", "➕ 루틴 만들기", "📅 주간 계획", "✍️ 내 운동"],
+        key="routine_section",
+    )
+    if routine_menu == "📋 저장 루틴":
         _render_routine_list(user, date_str)
-    with tab_builder:
+    if routine_menu == "➕ 루틴 만들기":
         _render_routine_builder(user)
-    with tab_plan:
+    if routine_menu == "📅 주간 계획":
         _render_weekly_plan(user)
-    with tab_custom:
+    if routine_menu == "✍️ 내 운동":
         _render_custom_exercises(user)
 
 
@@ -418,7 +424,11 @@ def render_workout_session(user: dict, date_str: str, render_timer):
     if previous:
         prev_text = " / ".join(f"{s.get('w', '-')}kg×{s.get('r', '-')}회" for s in previous.get("sets", []))
         st.info(f"지난 기록 ({previous.get('date')}): {prev_text}")
-        rec = progression_recommendation(previous.get("sets", []), item.get("target_reps", 10))
+        rec = progression_recommendation(
+            previous.get("sets", []),
+            item.get("target_reps", 10),
+            expected_sets=int(item.get("sets", 3)),
+        )
         st.caption("📈 " + rec["message"])
         if st.button("지난 기록 그대로 채우기", use_container_width=True, key=f"{prefix}_copy"):
             for set_index in range(int(item.get("sets", 3))):
@@ -433,10 +443,11 @@ def render_workout_session(user: dict, date_str: str, render_timer):
     new_sets = []
     for set_index in range(int(item.get("sets", 3))):
         old = existing_sets[set_index] if set_index < len(existing_sets) else {"w": "", "r": ""}
-        c1, c2, c3 = st.columns([0.8, 1.5, 1.5])
-        c1.markdown(f"**{set_index + 1}세트**")
-        weight = c2.text_input("무게", value=str(old.get("w", "")), key=f"{prefix}_w_{set_index}", label_visibility="collapsed", placeholder="kg")
-        reps = c3.text_input("횟수", value=str(old.get("r", "")), key=f"{prefix}_r_{set_index}", label_visibility="collapsed", placeholder="회")
+        with st.container(key=f"setrow_session_{session_id}_{index}_{set_index}"):
+            c1, c2, c3 = st.columns([0.8, 1.5, 1.5])
+            c1.markdown(f"**{set_index + 1}세트**")
+            weight = c2.text_input("무게", value=str(old.get("w", "")), key=f"{prefix}_w_{set_index}", label_visibility="collapsed", placeholder="kg")
+            reps = c3.text_input("횟수", value=str(old.get("r", "")), key=f"{prefix}_r_{set_index}", label_visibility="collapsed", placeholder="회")
         new_sets.append({"w": weight, "r": reps})
     memo = st.text_input("메모", value=current.get("memo", "") if current else "", key=f"{prefix}_memo")
     render_timer()
@@ -484,12 +495,26 @@ def render_workout_session(user: dict, date_str: str, render_timer):
 
 def render_body_metrics(user: dict, date_str: str):
     st.markdown("**⚖️ 몸무게·체형 기록**")
-    with st.form("body_metric_form"):
-        metric_date = st.date_input("측정일", value=dt.date.fromisoformat(date_str))
-        weight = st.number_input("체중(kg)", min_value=0.0, max_value=500.0, step=0.1)
-        muscle = st.number_input("골격근량(kg)", min_value=0.0, max_value=500.0, step=0.1)
-        body_fat = st.number_input("체지방률(%)", min_value=0.0, max_value=100.0, step=0.1)
-        memo = st.text_input("메모", placeholder="예: 아침 공복 측정")
+    metric_date = st.date_input("측정일", value=dt.date.fromisoformat(date_str), key="body_metric_date")
+    date_key = metric_date.isoformat()
+    existing = db.get_body_metric(user["id"], date_key) or {}
+    with st.form(f"body_metric_form_{date_key}"):
+        weight = st.number_input(
+            "체중(kg)", min_value=0.0, max_value=500.0, value=float(existing.get("weight") or 0), step=0.1,
+            key=f"body_weight_{date_key}",
+        )
+        muscle = st.number_input(
+            "골격근량(kg)", min_value=0.0, max_value=500.0, value=float(existing.get("muscle_mass") or 0), step=0.1,
+            key=f"body_muscle_{date_key}",
+        )
+        body_fat = st.number_input(
+            "체지방률(%)", min_value=0.0, max_value=100.0, value=float(existing.get("body_fat") or 0), step=0.1,
+            key=f"body_fat_{date_key}",
+        )
+        memo = st.text_input(
+            "메모", value=existing.get("memo", ""), placeholder="예: 아침 공복 측정",
+            key=f"body_memo_{date_key}",
+        )
         submitted = st.form_submit_button("체형 기록 저장", use_container_width=True)
     if submitted:
         ok, message = db.save_body_metric(
