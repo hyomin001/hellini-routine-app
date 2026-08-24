@@ -79,8 +79,10 @@ st.markdown(
 PART_COLORS = {
     "PART1": "#FF9F5A",
     "PART2": "#5AA9FF",
-    "PART3": "#5AFF9F",
-    "PART4": "#FF5A9F",
+    "PART3": "#FF5A9F",
+    "PART4": "#B15AFF",
+    "PART5": "#5AFF9F",
+    "PART6": "#FFC834",
 }
 CARDIO_COLOR = "#4ECDC4"
 
@@ -581,7 +583,7 @@ def render_today(user: dict):
         "<div style='background:#1B1D22; border:1px solid #33373F; border-radius:8px; "
         "padding:10px 12px; font-size:12.5px; color:#9296A0; margin:10px 0 18px;'>"
         "✓ 모든 무게는 마지막 2~3개가 <b style='color:#FFC834;'>매우 힘들 정도</b>로 진행하세요. "
-        "주 4회가 힘들면 부위 순서(사이클)만 지켜서 따라하면 됩니다."
+        "주 6회가 힘들면 부위 순서(사이클)만 지켜서 따라하면 됩니다."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -589,7 +591,7 @@ def render_today(user: dict):
     log_for_date = db.get_log_for_date(user["id"], date_str)
     pr_map = db.get_personal_records(user["id"])
 
-    # ---- 이 날짜의 전체(부위 1~4 합산) 진행 요약 ----
+    # ---- 이 날짜의 전체(부위 1~6 합산) 진행 요약 ----
     total_all, done_all = 0, 0
     for part in PARTS:
         for ex in exercises_for_part(part["key"]):

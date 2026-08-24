@@ -19,10 +19,12 @@ for _e in EX:
     _e["img_path"] = os.path.join(_ASSETS_DIR, f"{_e['img']}.jpg")
 
 PARTS = [
-    {"key": "PART1", "label": "부위 1", "part": "가슴·삼두·어깨"},
-    {"key": "PART2", "label": "부위 2", "part": "등·이두·후면어깨"},
-    {"key": "PART3", "label": "부위 3", "part": "하체·엉덩이·복근"},
-    {"key": "PART4", "label": "부위 4", "part": "어깨·팔"},
+    {"key": "PART1", "label": "부위 1", "part": "가슴"},
+    {"key": "PART2", "label": "부위 2", "part": "등"},
+    {"key": "PART3", "label": "부위 3", "part": "어깨"},
+    {"key": "PART4", "label": "부위 4", "part": "팔(이두·삼두)"},
+    {"key": "PART5", "label": "부위 5", "part": "하체·엉덩이"},
+    {"key": "PART6", "label": "부위 6", "part": "복근·코어"},
 ]
 
 EX_BY_NAME = {}
@@ -94,7 +96,7 @@ def get_tier(total_days: int) -> dict:
 
 # ================= 유산소 =================
 # 근력(세트×무게×횟수) 구조와 달리 유산소는 "시간 + (있으면) 거리" 구조라서
-# PARTS 와는 별도의 카테고리로 취급한다 ('오늘' 화면에 부위1~4 탭 옆에 별도 탭으로 노출).
+# PARTS 와는 별도의 카테고리로 취급한다 ('오늘' 화면에 부위1~6 탭 옆에 별도 탭으로 노출).
 #
 # has_distance=True  : 거리 입력을 받고, PR은 최장거리 + 최고페이스(가장 빠른 기록) 둘 다 추적
 # has_distance=False : 시간만 입력받고, PR은 최장시간만 추적
