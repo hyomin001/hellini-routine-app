@@ -19,7 +19,18 @@ from pathlib import Path
 from bson import ObjectId
 from pymongo import MongoClient
 
-COLLECTIONS = ["users", "logs", "inquiries"]
+COLLECTIONS = [
+    "users",
+    "logs",
+    "cardio_logs",
+    "inquiries",
+    "posts",
+    "routines",
+    "weekly_plans",
+    "body_metrics",
+    "exercise_catalog",
+    "workout_sessions",
+]
 
 BACKUP_DIR = Path(__file__).resolve().parent.parent / "backups"
 LATEST_DIR = BACKUP_DIR / "latest"

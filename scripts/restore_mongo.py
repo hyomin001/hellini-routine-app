@@ -19,7 +19,18 @@ from pathlib import Path
 from bson import ObjectId
 from pymongo import MongoClient
 
-COLLECTIONS = ["users", "logs", "inquiries"]
+COLLECTIONS = [
+    "users",
+    "logs",
+    "cardio_logs",
+    "inquiries",
+    "posts",
+    "routines",
+    "weekly_plans",
+    "body_metrics",
+    "exercise_catalog",
+    "workout_sessions",
+]
 LATEST_DIR = Path(__file__).resolve().parent.parent / "backups" / "latest"
 
 
@@ -30,7 +41,15 @@ def _object_hook(d):
             d["_id"] = ObjectId(d["_id"])
         except Exception:
             pass
-    for key in ("created_at", "updated_at", "last_seen"):
+    for key in (
+        "created_at",
+        "updated_at",
+        "last_seen",
+        "started_at",
+        "finished_at",
+        "completed_at",
+        "answered_at",
+    ):
         if key in d and isinstance(d[key], str):
             try:
                 d[key] = datetime.fromisoformat(d[key])

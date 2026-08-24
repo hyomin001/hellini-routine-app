@@ -12,10 +12,12 @@ from typing import Optional
 
 import streamlit as st
 from pymongo import MongoClient, ASCENDING, DESCENDING
+from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
 from PIL import Image, ImageOps
 
 from utils.auth import hash_password, verify_password
+from utils.training import normalize_routine_items, parse_target_reps
 
 # 비밀번호 찾기용 보안 질문 목록 (회원가입 시 하나 선택)
 SECURITY_QUESTIONS = [
@@ -60,6 +62,12 @@ def init_indexes():
     db.inquiries.create_index([("created_at", DESCENDING)])
     db.presence.create_index("user_id", unique=True)
     db.presence.create_index("last_seen")
+    db.routines.create_index([("user_id", ASCENDING), ("name", ASCENDING)], unique=True)
+    db.routines.create_index([("user_id", ASCENDING), ("updated_at", DESCENDING)])
+    db.weekly_plans.create_index("user_id", unique=True)
+    db.body_metrics.create_index([("user_id", ASCENDING), ("date", ASCENDING)], unique=True)
+    db.exercise_catalog.create_index([("scope", ASCENDING), ("user_id", ASCENDING), ("name", ASCENDING)])
+    db.workout_sessions.create_index([("user_id", ASCENDING), ("status", ASCENDING), ("started_at", DESCENDING)])
 
     # ---- 게시판 스키마 변경 (v2) ----
     # 예전에는 "하루 1인 1게시글(인증샷)" 구조라 (user_id, date) 유니크 인덱스가 있었지만,
@@ -172,6 +180,11 @@ def delete_user(user_id: str):
     db.logs.delete_many({"user_id": user_id})
     db.cardio_logs.delete_many({"user_id": user_id})
     db.presence.delete_one({"user_id": user_id})
+    db.routines.delete_many({"user_id": user_id})
+    db.weekly_plans.delete_one({"user_id": user_id})
+    db.body_metrics.delete_many({"user_id": user_id})
+    db.exercise_catalog.delete_many({"scope": "user", "user_id": user_id})
+    db.workout_sessions.delete_many({"user_id": user_id})
 
 
 # ================= 비밀번호 찾기 (보안 질문) =================
@@ -1096,3 +1109,362 @@ def toggle_reaction(post_id, user_id: str, emoji: str):
         users.add(user_id)
     reactions[emoji] = list(users)
     database.posts.update_one({"_id": ObjectId(post_id)}, {"$set": {"reactions": reactions}})
+
+
+# ================= 나만의 루틴 =================
+
+def list_routines(user_id: str) -> list:
+    """사용자가 저장한 루틴을 최근 수정 순으로 반환한다."""
+    return list(get_db().routines.find({"user_id": user_id}).sort("updated_at", DESCENDING))
+
+
+def get_routine(routine_id, user_id: Optional[str] = None) -> Optional[dict]:
+    """루틴 하나를 조회한다. user_id가 있으면 소유권도 함께 확인한다."""
+    try:
+        query = {"_id": ObjectId(routine_id)}
+    except Exception:
+        return None
+    if user_id is not None:
+        query["user_id"] = user_id
+    return get_db().routines.find_one(query)
+
+
+def save_routine(user_id: str, name: str, items: list, routine_id=None):
+    """루틴을 새로 만들거나 수정한다."""
+    name = (name or "").strip()
+    clean_items = normalize_routine_items(items)
+    if not name:
+        return False, "루틴 이름을 입력해주세요.", None
+    if not clean_items:
+        return False, "운동을 하나 이상 선택해주세요.", None
+    now = datetime.utcnow()
+    database = get_db()
+    try:
+        if routine_id:
+            query = {"_id": ObjectId(routine_id), "user_id": user_id}
+            result = database.routines.update_one(
+                query,
+                {"$set": {"name": name, "items": clean_items, "updated_at": now}},
+            )
+            if not result.matched_count:
+                return False, "수정할 루틴을 찾을 수 없어요.", None
+            return True, "루틴을 수정했어요.", str(routine_id)
+        result = database.routines.insert_one(
+            {"user_id": user_id, "name": name, "items": clean_items, "created_at": now, "updated_at": now}
+        )
+        return True, "루틴을 저장했어요.", str(result.inserted_id)
+    except DuplicateKeyError:
+        return False, "같은 이름의 루틴이 이미 있어요.", None
+    except (TypeError, ValueError):
+        return False, "루틴 데이터 형식을 확인해주세요.", None
+
+
+def duplicate_routine(routine_id, user_id: str):
+    """루틴을 '복사본' 이름으로 복제한다."""
+    routine = get_routine(routine_id, user_id)
+    if not routine:
+        return False, "복제할 루틴을 찾을 수 없어요.", None
+    existing = {r["name"] for r in list_routines(user_id)}
+    base = f"{routine['name']} 복사본"
+    name = base
+    number = 2
+    while name in existing:
+        name = f"{base} {number}"
+        number += 1
+    return save_routine(user_id, name, routine.get("items", []))
+
+
+def delete_routine(routine_id, user_id: str) -> bool:
+    """본인의 루틴을 삭제하고 주간 계획의 연결도 제거한다."""
+    try:
+        rid = ObjectId(routine_id)
+    except Exception:
+        return False
+    result = get_db().routines.delete_one({"_id": rid, "user_id": user_id})
+    if result.deleted_count:
+        plan = get_weekly_plan(user_id)
+        schedule = {k: v for k, v in plan.items() if str(v) != str(routine_id)}
+        save_weekly_plan(user_id, schedule)
+        return True
+    return False
+
+
+# ================= 주간 루틴 계획 =================
+
+def get_weekly_plan(user_id: str) -> dict:
+    """요일 번호 문자열('0'=월요일) -> routine_id 매핑을 반환한다."""
+    doc = get_db().weekly_plans.find_one({"user_id": user_id})
+    return dict(doc.get("schedule", {})) if doc else {}
+
+
+def save_weekly_plan(user_id: str, schedule: dict):
+    """사용자의 요일별 루틴 계획을 저장한다."""
+    clean = {
+        str(day): str(routine_id)
+        for day, routine_id in (schedule or {}).items()
+        if str(day) in {str(i) for i in range(7)} and routine_id
+    }
+    get_db().weekly_plans.update_one(
+        {"user_id": user_id},
+        {"$set": {"schedule": clean, "updated_at": datetime.utcnow()}},
+        upsert=True,
+    )
+    return clean
+
+
+# ================= 체형 기록 =================
+
+def save_body_metric(user_id: str, date_str: str, weight=None, muscle_mass=None, body_fat=None, memo: str = ""):
+    """같은 날짜의 체중·골격근량·체지방률을 저장 또는 수정한다."""
+    values = {}
+    for key, value in (("weight", weight), ("muscle_mass", muscle_mass), ("body_fat", body_fat)):
+        if value in (None, ""):
+            values[key] = None
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return False, "체형 수치는 숫자로 입력해주세요."
+        if number <= 0 or number > 500:
+            return False, "체형 수치의 입력 범위를 확인해주세요."
+        values[key] = number
+    if all(values[k] is None for k in values):
+        return False, "체중·골격근량·체지방률 중 하나 이상 입력해주세요."
+    now = datetime.utcnow()
+    get_db().body_metrics.update_one(
+        {"user_id": user_id, "date": date_str},
+        {"$set": {**values, "memo": (memo or "").strip(), "updated_at": now}, "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
+    return True, "체형 기록을 저장했어요."
+
+
+def get_body_metrics(user_id: str, limit: int = 365) -> list:
+    """최근 체형 기록을 날짜 오름차순으로 반환한다."""
+    rows = list(get_db().body_metrics.find({"user_id": user_id}).sort("date", DESCENDING).limit(limit))
+    rows.reverse()
+    return rows
+
+
+def delete_body_metric(user_id: str, date_str: str) -> bool:
+    return get_db().body_metrics.delete_one({"user_id": user_id, "date": date_str}).deleted_count > 0
+
+
+# ================= 공식/사용자 운동 카탈로그 =================
+
+def _base_exercise_catalog() -> list:
+    """JSON 기본 운동을 이름 기준으로 중복 제거해 반환한다."""
+    from utils.data import EX_BY_NAME
+    rows = []
+    for name, item in EX_BY_NAME.items():
+        rows.append(
+            {
+                "name": name,
+                "part": item.get("part", "PART1"),
+                "sets": int(item.get("sets") or 3),
+                "target_reps": parse_target_reps(item.get("reps")),
+                "reps": item.get("reps", "10회"),
+                "equip": item.get("equip", ""),
+                "howto": item.get("howto", []),
+                "caution": item.get("caution", ""),
+                "tip": item.get("tip", ""),
+                "img_path": item.get("img_path"),
+                "source": "official",
+                "base_name": name,
+                "active": True,
+            }
+        )
+    return rows
+
+
+def get_exercise_catalog(user_id: Optional[str] = None, include_inactive: bool = False) -> list:
+    """기본 JSON + 관리자 추가/수정 + 개인 운동을 하나의 목록으로 합친다."""
+    database = get_db()
+    rows = _base_exercise_catalog()
+    by_name = {item["name"]: item for item in rows}
+    query = {"$or": [{"scope": "official"}]}
+    if user_id:
+        query["$or"].append({"scope": "user", "user_id": user_id})
+    for doc in database.exercise_catalog.find(query):
+        clean = {k: v for k, v in doc.items() if k != "_id"}
+        clean["_db_id"] = str(doc["_id"])
+        clean.setdefault("active", True)
+        clean.setdefault("source", "official" if doc.get("scope") == "official" else "custom")
+        base_name = doc.get("base_name")
+        if base_name and base_name in by_name:
+            by_name[base_name].update(clean)
+            by_name[base_name]["name"] = base_name
+        else:
+            by_name[clean["name"]] = clean
+    result = list(by_name.values())
+    if not include_inactive:
+        result = [item for item in result if item.get("active", True)]
+    return sorted(result, key=lambda item: (item.get("source") != "official", item.get("part", ""), item["name"]))
+
+
+def get_exercises_for_part_catalog(user_id: Optional[str], part_key: str) -> list:
+    """Return the merged catalog for a body part while preserving JSON cross-part entries."""
+    from utils.data import exercises_for_part
+
+    # Inactive overrides must stay visible here so a disabled base exercise does
+    # not fall back to its original JSON entry.
+    catalog = get_exercise_catalog(user_id, include_inactive=True)
+    by_name = {item["name"]: item for item in catalog}
+    rows = []
+    seen = set()
+    for base in exercises_for_part(part_key):
+        merged = dict(base)
+        override = by_name.get(base["name"])
+        if override:
+            merged.update(override)
+            # A base exercise can intentionally belong to more than one JSON section.
+            merged["part"] = part_key
+        if merged.get("active", True):
+            rows.append(merged)
+            seen.add(merged["name"])
+    rows.extend(
+        item for item in catalog
+        if item.get("part") == part_key and item["name"] not in seen and item.get("active", True)
+    )
+    return rows
+
+
+def save_catalog_exercise(scope: str, user_id: Optional[str], data: dict, exercise_id=None, base_name=None):
+    """개인 운동 또는 관리자 공식 운동/수정분을 저장한다."""
+    if scope not in {"official", "user"}:
+        return False, "운동 구분이 올바르지 않아요.", None
+    name = (data.get("name") or base_name or "").strip()
+    if not name:
+        return False, "운동 이름을 입력해주세요.", None
+    try:
+        sets = max(1, min(20, int(data.get("sets") or 3)))
+        target_reps = max(1, min(1000, int(data.get("target_reps") or 10)))
+    except (TypeError, ValueError):
+        return False, "세트와 목표 횟수는 숫자로 입력해주세요.", None
+    doc = {
+        "scope": scope,
+        "user_id": user_id if scope == "user" else None,
+        "name": name,
+        "part": data.get("part", "PART1"),
+        "sets": sets,
+        "target_reps": target_reps,
+        "reps": f"{target_reps}회",
+        "equip": (data.get("equip") or "").strip(),
+        "howto": [str(x).strip() for x in data.get("howto", []) if str(x).strip()],
+        "caution": (data.get("caution") or "").strip(),
+        "tip": (data.get("tip") or "").strip(),
+        "img_path": (data.get("img_path") or "").strip() or None,
+        "source": "official" if scope == "official" else "custom",
+        "active": bool(data.get("active", True)),
+        "updated_at": datetime.utcnow(),
+    }
+    if base_name:
+        doc["base_name"] = base_name
+        doc["name"] = base_name
+    database = get_db()
+    if not exercise_id:
+        base_names = {item["name"] for item in _base_exercise_catalog()}
+        if not base_name and doc["name"] in base_names:
+            return False, "기본 운동과 같은 이름은 사용할 수 없어요.", None
+        duplicate_query = {"scope": scope, "name": doc["name"]}
+        duplicate_query["user_id"] = doc["user_id"]
+        if database.exercise_catalog.find_one(duplicate_query):
+            return False, "같은 이름의 운동이 이미 있어요.", None
+    try:
+        if exercise_id:
+            query = {"_id": ObjectId(exercise_id)}
+            if scope == "user":
+                query["user_id"] = user_id
+            result = database.exercise_catalog.update_one(query, {"$set": doc})
+            if not result.matched_count:
+                return False, "수정할 운동을 찾을 수 없어요.", None
+            return True, "운동을 수정했어요.", str(exercise_id)
+        doc["created_at"] = datetime.utcnow()
+        result = database.exercise_catalog.insert_one(doc)
+        return True, "운동을 저장했어요.", str(result.inserted_id)
+    except Exception:
+        return False, "운동을 저장하지 못했어요.", None
+
+
+def delete_catalog_exercise(exercise_id: str, user_id: Optional[str] = None, is_admin: bool = False) -> bool:
+    """DB에 추가된 운동을 권한에 맞게 삭제한다."""
+    try:
+        query = {"_id": ObjectId(exercise_id)}
+    except Exception:
+        return False
+    if not is_admin:
+        query.update({"scope": "user", "user_id": user_id})
+    return get_db().exercise_catalog.delete_one(query).deleted_count > 0
+
+
+# ================= 루틴 운동 세션 =================
+
+def get_previous_exercise_log(user_id: str, exercise_name: str, before_date: Optional[str] = None) -> Optional[dict]:
+    """선택 날짜보다 이전의 가장 최근 근력 기록을 반환한다."""
+    query = {"user_id": user_id, "exercise_name": exercise_name}
+    if before_date:
+        query["date"] = {"$lt": before_date}
+    return get_db().logs.find_one(query, sort=[("date", DESCENDING), ("updated_at", DESCENDING)])
+
+
+def start_workout_session(user_id: str, routine: dict, date_str: str) -> str:
+    """루틴 스냅샷으로 새로운 진행 세션을 만든다."""
+    items = normalize_routine_items(routine.get("items", []))
+    database = get_db()
+    database.workout_sessions.update_many(
+        {"user_id": user_id, "status": "active"},
+        {"$set": {"status": "replaced", "finished_at": datetime.utcnow()}},
+    )
+    doc = {
+        "user_id": user_id,
+        "routine_id": str(routine.get("_id", "")),
+        "routine_name": routine.get("name", "나만의 루틴"),
+        "date": date_str,
+        "items": items,
+        "completed_indexes": [],
+        "current_index": 0,
+        "status": "active",
+        "started_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+    result = database.workout_sessions.insert_one(doc)
+    return str(result.inserted_id)
+
+
+def get_workout_session(session_id, user_id: str) -> Optional[dict]:
+    try:
+        return get_db().workout_sessions.find_one({"_id": ObjectId(session_id), "user_id": user_id})
+    except Exception:
+        return None
+
+
+def get_active_workout_session(user_id: str) -> Optional[dict]:
+    return get_db().workout_sessions.find_one(
+        {"user_id": user_id, "status": "active"}, sort=[("started_at", DESCENDING)]
+    )
+
+
+def update_workout_session(session_id, user_id: str, current_index=None, completed_index=None):
+    """세션의 현재 운동과 완료 운동을 원자적으로 갱신한다."""
+    try:
+        query = {"_id": ObjectId(session_id), "user_id": user_id, "status": "active"}
+    except Exception:
+        return False
+    update = {"$set": {"updated_at": datetime.utcnow()}}
+    if current_index is not None:
+        update["$set"]["current_index"] = max(0, int(current_index))
+    if completed_index is not None:
+        update["$addToSet"] = {"completed_indexes": int(completed_index)}
+    return get_db().workout_sessions.update_one(query, update).matched_count > 0
+
+
+def finish_workout_session(session_id, user_id: str) -> bool:
+    try:
+        query = {"_id": ObjectId(session_id), "user_id": user_id, "status": "active"}
+    except Exception:
+        return False
+    result = get_db().workout_sessions.update_one(
+        query,
+        {"$set": {"status": "completed", "completed_at": datetime.utcnow(), "updated_at": datetime.utcnow()}},
+    )
+    return result.matched_count > 0

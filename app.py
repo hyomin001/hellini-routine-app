@@ -34,10 +34,10 @@ import streamlit.components.v1 as components
 from utils import db
 from utils import ui
 from utils import card
+from utils import features_ui
 from utils.data import (
     PARTS,
     EX_BY_NAME,
-    exercises_for_part,
     alt_exercises_for,
     random_exercise_for_part,
     get_tier,
@@ -430,6 +430,7 @@ def render_auth():
 # ================= 상단 네비게이션 (버튼식) =================
 NAV_PAGES = [
     ("today", "🏠 오늘"),
+    ("routines", "🧩 루틴"),
     ("mypage", "📖 기록"),
     ("board", "📋 게시판"),
     ("ranking", "🏆 랭킹"),
@@ -486,6 +487,8 @@ def render_quick_start(user: dict):
     '선택한 운동만 보기'를 켜면 그 운동들만 걸러서 보여준다."""
     st.session_state.setdefault("quick_pick", [])
     st.session_state.setdefault("quick_filter_on", False)
+    available_exercise_names = [item["name"] for item in db.get_exercise_catalog(user["id"])]
+    valid_quick_pick = [name for name in st.session_state["quick_pick"] if name in available_exercise_names]
 
     with st.expander("🎯 오늘 뭐 할지 아직 못 정했다면 (가는 길 / 웜업 중 추천)", expanded=False):
         mode = st.radio(
@@ -496,8 +499,8 @@ def render_quick_start(user: dict):
         if mode == "✅ 내가 직접 고르기":
             st.caption("오늘 할 운동만 체크하면, 아래 부위 탭에서 그 운동들만 골라서 보여줘요.")
             picked = st.multiselect(
-                "오늘 할 운동", ALL_EXERCISE_NAMES,
-                default=st.session_state["quick_pick"], key="quick_multiselect",
+                "오늘 할 운동", available_exercise_names,
+                default=valid_quick_pick, key="quick_multiselect",
             )
             with st.container(key="evenrow_quickpick_btns"):
                 c1, c2 = st.columns(2)
@@ -588,13 +591,15 @@ def render_today(user: dict):
         unsafe_allow_html=True,
     )
 
+    features_ui.render_today_routine_launcher(user, date_str)
+
     log_for_date = db.get_log_for_date(user["id"], date_str)
     pr_map = db.get_personal_records(user["id"])
 
     # ---- 이 날짜의 전체(부위 1~6 합산) 진행 요약 ----
     total_all, done_all = 0, 0
     for part in PARTS:
-        for ex in exercises_for_part(part["key"]):
+        for ex in db.get_exercises_for_part_catalog(user["id"], part["key"]):
             total_all += 1
             existing = log_for_date.get(ex["name"])
             sets_state = existing["sets"] if existing else [{"w": "", "r": ""} for _ in range(ex["sets"])]
@@ -638,7 +643,7 @@ def render_today(user: dict):
 
     for tab, part in zip(tab_objs[:-1], PARTS):
         with tab:
-            all_exercises = exercises_for_part(part["key"])
+            all_exercises = db.get_exercises_for_part_catalog(user["id"], part["key"])
             exercises = (
                 [e for e in all_exercises if e["name"] in quick_pick]
                 if quick_filter_on else all_exercises
@@ -940,8 +945,8 @@ def render_mypage(user: dict):
 
     ui.render_streak_heatmap(db.get_workout_dates(user["id"]))
 
-    tab_pr, tab_cardio_pr, tab_badges, tab_history, tab_settings = st.tabs(
-        ["🏅 개인 최고기록", "🏃 유산소 기록", "🎖️ 뱃지", "🗓️ 기록 히스토리", "⚙️ 계정 설정"]
+    tab_pr, tab_cardio_pr, tab_insights, tab_body, tab_badges, tab_history, tab_settings = st.tabs(
+        ["🏅 개인 최고기록", "🏃 유산소 기록", "📈 훈련 통계", "⚖️ 체형", "🎖️ 뱃지", "🗓️ 기록", "⚙️ 설정"]
     )
 
     with tab_pr:
@@ -983,6 +988,12 @@ def render_mypage(user: dict):
                 rows.append(row)
             st.dataframe(rows, use_container_width=True, hide_index=True)
             st.caption("거리가 있는 종목은 최장거리·최고페이스(가장 빠른 기록)를, 거리가 없는 종목은 최장시간을 보여줘요.")
+
+    with tab_insights:
+        features_ui.render_training_insights(user, today_kst().isoformat())
+
+    with tab_body:
+        features_ui.render_body_metrics(user, today_kst().isoformat())
 
     with tab_badges:
         st.caption("꾸준함과 기록이 쌓이면 뱃지가 하나씩 열려요.")
@@ -1132,7 +1143,9 @@ def render_admin(user: dict):
     st.subheader("🛠️ 관리자 페이지")
     st.caption(f"{user['nickname']}님, 어서오세요. 여기는 운영자만 볼 수 있어요.")
 
-    tab_dash, tab_users, tab_inquiries = st.tabs(["📊 대시보드", "👥 회원 관리", "💬 문의 관리"])
+    tab_dash, tab_users, tab_inquiries, tab_exercises = st.tabs(
+        ["📊 대시보드", "👥 회원 관리", "💬 문의 관리", "🏋️ 운동 관리"]
+    )
 
     with tab_dash:
         stats = db.get_dashboard_stats()
@@ -1274,6 +1287,9 @@ def render_admin(user: dict):
                         db.answer_inquiry(q["_id"], answer_val)
                         st.toast("답변을 저장했어요.", icon="✅")
                         st.rerun()
+
+    with tab_exercises:
+        features_ui.render_admin_exercise_editor()
 
 
 # ================= 게시판 (자유 / 운동 / 정보 / 인증샷) =================
@@ -1567,6 +1583,10 @@ else:
 
     if _page == "mypage":
         render_mypage(_user)
+    elif _page == "routines":
+        features_ui.render_routines_page(_user, today_kst().isoformat())
+    elif _page == "session":
+        features_ui.render_workout_session(_user, today_kst().isoformat(), render_rest_timer)
     elif _page == "board":
         render_board(_user)
     elif _page == "ranking":
