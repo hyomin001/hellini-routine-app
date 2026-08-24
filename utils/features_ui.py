@@ -91,7 +91,8 @@ def _set_builder(routine: dict | None = None):
     st.session_state["routine_draft_name"] = routine.get("name", "")
     st.session_state["routine_draft_items"] = [dict(item) for item in routine.get("items", [])]
     st.session_state["routine_builder_nonce"] = st.session_state.get("routine_builder_nonce", 0) + 1
-    st.session_state.pop("routine_catalog_select", None)
+    st.session_state["routine_pending_name"] = routine.get("name", "")
+    st.session_state["routine_pending_catalog"] = [item["exercise_name"] for item in routine.get("items", [])]
 
 
 def _render_beginner_generator(catalog: list[dict]):
@@ -136,21 +137,29 @@ def _render_beginner_generator(catalog: list[dict]):
                 if not st.session_state.get("routine_draft_name"):
                     part_text = "·".join(PART_NAMES[key] for key in selected_parts)
                     st.session_state["routine_draft_name"] = f"{part_text} 추천 루틴"
+                st.session_state["routine_name_input"] = st.session_state["routine_draft_name"]
                 st.session_state["routine_builder_nonce"] = st.session_state.get("routine_builder_nonce", 0) + 1
-                st.session_state.pop("routine_catalog_select", None)
+                # 추천 결과와 멀티셀렉트의 프론트엔드 상태를 함께 맞춰야
+                # 세트/횟수 변경으로 재실행돼도 추천 카드가 사라지지 않는다.
+                st.session_state["routine_catalog_select"] = [item["name"] for item in rows]
                 st.rerun()
         else:
             st.info("운동할 부위를 하나 이상 선택해주세요.")
 
 
 def _render_routine_builder(user: dict):
+    if "routine_pending_name" in st.session_state:
+        st.session_state["routine_name_input"] = st.session_state.pop("routine_pending_name")
+    if "routine_pending_catalog" in st.session_state:
+        st.session_state["routine_catalog_select"] = st.session_state.pop("routine_pending_catalog")
     catalog = db.get_exercise_catalog(user["id"])
     by_name = {item["name"]: item for item in catalog}
     draft = st.session_state.setdefault("routine_draft_items", [])
     edit_id = st.session_state.get("routine_edit_id")
     st.markdown(f"**{'✏️ 루틴 수정' if edit_id else '➕ 새 루틴'}**")
     _render_beginner_generator(catalog)
-    name = st.text_input("루틴 이름", value=st.session_state.get("routine_draft_name", ""), placeholder="예: 가슴 루틴")
+    st.session_state.setdefault("routine_name_input", st.session_state.get("routine_draft_name", ""))
+    name = st.text_input("루틴 이름", placeholder="예: 가슴 루틴", key="routine_name_input")
     st.session_state["routine_draft_name"] = name
 
     labels = {}
@@ -159,14 +168,16 @@ def _render_routine_builder(user: dict):
         equipment = item.get("equip") or "기구 없음/미지정"
         labels[item["name"]] = f"{badge} · {PART_NAMES.get(item.get('part'), '기타')} · {item['name']} · {equipment}"
     current_names = [item["exercise_name"] for item in draft if item["exercise_name"] in by_name]
-    selected_names = st.multiselect(
-        "운동 선택",
-        list(by_name),
-        default=current_names,
-        format_func=lambda n: labels[n],
-        key="routine_catalog_select",
-        placeholder="원하는 운동을 골라주세요",
-    )
+    select_args = {
+        "label": "운동 선택",
+        "options": list(by_name),
+        "format_func": lambda n: labels[n],
+        "key": "routine_catalog_select",
+        "placeholder": "원하는 운동을 골라주세요",
+    }
+    if "routine_catalog_select" not in st.session_state:
+        select_args["default"] = current_names
+    selected_names = st.multiselect(**select_args)
     if selected_names != current_names:
         previous = {item["exercise_name"]: item for item in draft}
         draft = []
