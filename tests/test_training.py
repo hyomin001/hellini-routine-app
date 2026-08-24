@@ -6,6 +6,7 @@ from utils.training import (
     normalize_routine_items,
     parse_target_reps,
     progression_recommendation,
+    recommend_exercises,
     volume_by_part,
     weekly_training_summary,
 )
@@ -59,6 +60,21 @@ class TrainingLogicTests(unittest.TestCase):
             {"스쿼트": "하체·엉덩이"},
         )
         self.assertEqual(result["하체·엉덩이"], 500)
+
+    def test_recommend_exercises_balances_parts_and_uses_official_only(self):
+        import random
+
+        catalog = [
+            {"name": "가슴1", "part": "PART1", "source": "official", "active": True},
+            {"name": "가슴2", "part": "PART1", "source": "official", "active": True},
+            {"name": "등1", "part": "PART2", "source": "official", "active": True},
+            {"name": "내 운동", "part": "PART1", "source": "custom", "active": True},
+            {"name": "숨김", "part": "PART2", "source": "official", "active": False},
+        ]
+        rows = recommend_exercises(catalog, ["PART1", "PART2"], 3, random.Random(1))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({row["part"] for row in rows}, {"PART1", "PART2"})
+        self.assertNotIn("내 운동", [row["name"] for row in rows])
 
 
 if __name__ == "__main__":

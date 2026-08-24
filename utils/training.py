@@ -6,6 +6,7 @@ Streamlit이나 MongoDB에 의존하지 않아 단위 테스트에서 바로 검
 from __future__ import annotations
 
 from datetime import date, timedelta
+import random
 from typing import Iterable, Optional
 
 
@@ -152,3 +153,24 @@ def volume_by_part(logs: Iterable[dict], exercise_parts: dict[str, str]) -> dict
         part = exercise_parts.get(log.get("exercise_name"), "기타")
         result[part] = result.get(part, 0.0) + sum(w * r for w, r in valid_sets(log.get("sets", [])))
     return result
+
+
+def recommend_exercises(catalog: Iterable[dict], part_keys: Iterable[str], count: int, rng=None) -> list[dict]:
+    """선택 부위에서 활성 공식 운동을 골고루 섞어 루틴 후보를 만든다."""
+    rng = rng or random
+    parts = list(dict.fromkeys(str(key) for key in part_keys or [] if key))
+    count = max(0, int(count or 0))
+    groups = {part: [] for part in parts}
+    for item in catalog or []:
+        part = item.get("part")
+        if part in groups and item.get("source", "official") == "official" and item.get("active", True):
+            groups[part].append(dict(item))
+    for rows in groups.values():
+        rng.shuffle(rows)
+
+    picked = []
+    while len(picked) < count and any(groups.values()):
+        for part in parts:
+            if groups[part] and len(picked) < count:
+                picked.append(groups[part].pop())
+    return picked

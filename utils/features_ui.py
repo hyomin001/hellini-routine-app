@@ -11,6 +11,7 @@ from utils.data import PARTS
 from utils.training import (
     estimate_one_rep_max,
     progression_recommendation,
+    recommend_exercises,
     volume_by_part,
     weekly_training_summary,
 )
@@ -89,7 +90,57 @@ def _set_builder(routine: dict | None = None):
     st.session_state["routine_edit_id"] = str(routine.get("_id", "")) or None
     st.session_state["routine_draft_name"] = routine.get("name", "")
     st.session_state["routine_draft_items"] = [dict(item) for item in routine.get("items", [])]
+    st.session_state["routine_builder_nonce"] = st.session_state.get("routine_builder_nonce", 0) + 1
     st.session_state.pop("routine_catalog_select", None)
+
+
+def _render_beginner_generator(catalog: list[dict]):
+    """운동 이름을 모르는 사용자가 부위와 종목 수만으로 초안을 만든다."""
+    with st.container(border=True):
+        st.markdown("**🎲 초보자 자동 추천**")
+        st.caption("운동할 부위와 종목 수만 고르면 공식 운동 중에서 자동으로 골라드려요.")
+        part_keys = [part["key"] for part in PARTS]
+        selected_parts = st.multiselect(
+            "오늘 운동할 부위",
+            part_keys,
+            default=[part_keys[0]],
+            format_func=lambda key: PART_NAMES[key],
+            key="beginner_recommend_parts",
+        )
+        available = [
+            item for item in catalog
+            if item.get("source") == "official" and item.get("active", True) and item.get("part") in selected_parts
+        ]
+        max_count = min(10, len(available))
+        if max_count:
+            exercise_count = st.number_input(
+                "몇 종목 할까요?",
+                min_value=1,
+                max_value=max_count,
+                value=min(4, max_count),
+                step=1,
+                help="처음이라면 한 부위당 3~4종목 정도로 시작해보세요.",
+            )
+            if st.button("이 조건으로 랜덤 추천받기", type="primary", use_container_width=True):
+                rows = recommend_exercises(catalog, selected_parts, int(exercise_count))
+                st.session_state["routine_draft_items"] = [
+                    {
+                        "exercise_name": item["name"],
+                        "source": "official",
+                        "part": item.get("part", "PART1"),
+                        "sets": item.get("sets", 3),
+                        "target_reps": item.get("target_reps", 10),
+                    }
+                    for item in rows
+                ]
+                if not st.session_state.get("routine_draft_name"):
+                    part_text = "·".join(PART_NAMES[key] for key in selected_parts)
+                    st.session_state["routine_draft_name"] = f"{part_text} 추천 루틴"
+                st.session_state["routine_builder_nonce"] = st.session_state.get("routine_builder_nonce", 0) + 1
+                st.session_state.pop("routine_catalog_select", None)
+                st.rerun()
+        else:
+            st.info("운동할 부위를 하나 이상 선택해주세요.")
 
 
 def _render_routine_builder(user: dict):
@@ -98,12 +149,15 @@ def _render_routine_builder(user: dict):
     draft = st.session_state.setdefault("routine_draft_items", [])
     edit_id = st.session_state.get("routine_edit_id")
     st.markdown(f"**{'✏️ 루틴 수정' if edit_id else '➕ 새 루틴'}**")
+    _render_beginner_generator(catalog)
     name = st.text_input("루틴 이름", value=st.session_state.get("routine_draft_name", ""), placeholder="예: 가슴 루틴")
+    st.session_state["routine_draft_name"] = name
 
     labels = {}
     for item in catalog:
         badge = "공식" if item.get("source") == "official" else "내 운동"
-        labels[item["name"]] = f"{badge} · {PART_NAMES.get(item.get('part'), '기타')} · {item['name']}"
+        equipment = item.get("equip") or "기구 없음/미지정"
+        labels[item["name"]] = f"{badge} · {PART_NAMES.get(item.get('part'), '기타')} · {item['name']} · {equipment}"
     current_names = [item["exercise_name"] for item in draft if item["exercise_name"] in by_name]
     selected_names = st.multiselect(
         "운동 선택",
@@ -133,34 +187,48 @@ def _render_routine_builder(user: dict):
         st.session_state["routine_draft_items"] = draft
 
     if draft:
-        rows = []
+        nonce = st.session_state.get("routine_builder_nonce", 0)
+        configured = []
         for index, item in enumerate(draft, start=1):
-            rows.append(
-                {
-                    "순서": index,
-                    "운동": item["exercise_name"],
-                    "구분": "공식" if item.get("source") == "official" else "내 운동",
-                    "세트": int(item.get("sets", 3)),
-                    "목표횟수": int(item.get("target_reps", 10)),
-                }
-            )
-        edited = st.data_editor(
-            rows,
-            use_container_width=True,
-            hide_index=True,
-            disabled=["운동", "구분"],
-            column_config={
-                "순서": st.column_config.NumberColumn(min_value=1, max_value=max(1, len(rows)), step=1),
-                "세트": st.column_config.NumberColumn(min_value=1, max_value=20, step=1),
-                "목표횟수": st.column_config.NumberColumn(min_value=1, max_value=1000, step=1),
-            },
-            key=f"routine_editor_{edit_id or 'new'}",
-        )
-        save_items = []
-        previous = {item["exercise_name"]: item for item in draft}
-        for row in sorted(edited, key=lambda x: (x["순서"], x["운동"])):
-            original = previous[row["운동"]]
-            save_items.append({**original, "sets": int(row["세트"]), "target_reps": int(row["목표횟수"])})
+            detail = by_name.get(item["exercise_name"], {})
+            with st.container(border=True):
+                badge = "공식 운동" if item.get("source") == "official" else "내 운동"
+                st.markdown(f"**{index}. {item['exercise_name']}** · {badge}")
+                st.caption(
+                    f"부위: {PART_NAMES.get(item.get('part'), '기타')} · "
+                    f"기구: {detail.get('equip') or '기구 없음/미지정'}"
+                )
+                if detail.get("howto") or detail.get("tip"):
+                    with st.expander("운동 방법 보기"):
+                        if detail.get("howto"):
+                            st.markdown("\n".join(f"{i + 1}. {step}" for i, step in enumerate(detail["howto"])))
+                        if detail.get("tip"):
+                            st.info(detail["tip"])
+                order = st.selectbox(
+                    "운동 순서",
+                    list(range(1, len(draft) + 1)),
+                    index=index - 1,
+                    key=f"routine_order_{nonce}_{item['exercise_name']}",
+                )
+                c1, c2 = st.columns(2)
+                sets = c1.number_input(
+                    "기본 세트",
+                    1,
+                    20,
+                    int(item.get("sets", 3)),
+                    key=f"routine_sets_{nonce}_{item['exercise_name']}",
+                )
+                target = c2.number_input(
+                    "목표 횟수",
+                    1,
+                    1000,
+                    int(item.get("target_reps", 10)),
+                    key=f"routine_reps_{nonce}_{item['exercise_name']}",
+                )
+                configured.append((order, index, {**item, "sets": int(sets), "target_reps": int(target)}))
+        save_items = [row for _, _, row in sorted(configured, key=lambda value: (value[0], value[1]))]
+        configured_by_name = {row["exercise_name"]: row for _, _, row in configured}
+        st.session_state["routine_draft_items"] = [configured_by_name[item["exercise_name"]] for item in draft]
     else:
         save_items = []
         st.caption("전체 운동 목록에서 원하는 운동을 선택하면 순서·세트·목표 횟수를 설정할 수 있어요.")
@@ -187,16 +255,16 @@ def _render_routine_list(user: dict, date_str: str):
         with st.container(border=True):
             st.markdown(f"**{routine['name']}** · {len(routine.get('items', []))}종목")
             st.caption(" → ".join(item["exercise_name"] for item in routine.get("items", [])))
-            c1, c2, c3 = st.columns(3)
-            if c1.button("시작", key=f"routine_start_{rid}", use_container_width=True, type="primary"):
+            if st.button("순서대로 시작", key=f"routine_start_{rid}", use_container_width=True, type="primary"):
                 _start_session(user, routine, date_str)
+            c1, c2 = st.columns(2)
             if c2.button("오늘에 불러오기", key=f"routine_load_{rid}", use_container_width=True):
                 st.session_state["quick_pick"] = [item["exercise_name"] for item in routine.get("items", [])]
                 st.session_state["quick_filter_on"] = True
                 st.session_state["loaded_routine_id"] = rid
                 st.session_state["page"] = "today"
                 st.rerun()
-            if c3.button("수정", key=f"routine_edit_{rid}", use_container_width=True):
+            if c1.button("수정", key=f"routine_edit_{rid}", use_container_width=True):
                 _set_builder(routine)
                 st.rerun()
             d1, d2 = st.columns(2)
@@ -407,10 +475,9 @@ def render_body_metrics(user: dict, date_str: str):
     st.markdown("**⚖️ 몸무게·체형 기록**")
     with st.form("body_metric_form"):
         metric_date = st.date_input("측정일", value=dt.date.fromisoformat(date_str))
-        c1, c2, c3 = st.columns(3)
-        weight = c1.number_input("체중(kg)", min_value=0.0, max_value=500.0, step=0.1)
-        muscle = c2.number_input("골격근량(kg)", min_value=0.0, max_value=500.0, step=0.1)
-        body_fat = c3.number_input("체지방률(%)", min_value=0.0, max_value=100.0, step=0.1)
+        weight = st.number_input("체중(kg)", min_value=0.0, max_value=500.0, step=0.1)
+        muscle = st.number_input("골격근량(kg)", min_value=0.0, max_value=500.0, step=0.1)
+        body_fat = st.number_input("체지방률(%)", min_value=0.0, max_value=100.0, step=0.1)
         memo = st.text_input("메모", placeholder="예: 아침 공복 측정")
         submitted = st.form_submit_button("체형 기록 저장", use_container_width=True)
     if submitted:

@@ -60,11 +60,9 @@ BASE_CSS = """
     }
 }
 
-/* ===== Streamlit이 좁은 화면에서 컬럼(가로배치)을 세로로 쌓아버리는 기본 동작을 막는다 =====
-   (세트/무게/횟수, 버튼 줄 등이 세로로 길게 쌓이는 걸 방지) */
+/* ===== 일반 컬럼은 화면 폭에 맞게 줄어들고, 모바일에서는 세로로 쌓인다. =====
+   세트 입력·버튼 줄처럼 가로 유지가 필요한 곳은 아래 setrow/evenrow 전용 규칙이 맡는다. */
 div[data-testid="stHorizontalBlock"] {
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
     align-items: flex-start !important;
     width: 100% !important;
 }
@@ -79,11 +77,23 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="column"] * {
 /* 인풋/버튼/셀렉트박스가 내부에서 컬럼 폭을 넘어가지 않도록 (사이트 전체 공통) */
 div[data-testid="stTextInput"] input,
 div[data-testid="stTextInput"],
+div[data-testid="stNumberInput"],
+div[data-testid="stNumberInput"] input,
 div[data-testid="stSelectbox"],
 .stButton, .stButton > button {
     min-width: 0 !important;
     width: 100% !important;
     box-sizing: border-box !important;
+}
+@media (max-width: 480px) {
+    div[data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+        flex-wrap: nowrap !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
 }
 /* 만에 하나 안쪽에서 넘치는 요소가 있어도 화면 자체가
    가로로 스크롤되지 않게 최종 안전장치.
