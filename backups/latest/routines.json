@@ -1,1 +1,53 @@
-[]
+[
+  {
+    "_id": "6a8cb50054af44a0536fa3c7",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "name": "등 복근",
+    "items": [
+      {
+        "exercise_name": "랫 풀 다운",
+        "source": "official",
+        "part": "PART2",
+        "sets": 4,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "벤트오버 바벨 로우",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "시티드 케이블 로우",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "풀업 (턱걸이)",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 10
+      },
+      {
+        "exercise_name": "윗몸일으키기",
+        "source": "official",
+        "part": "PART6",
+        "sets": 3,
+        "target_reps": 20
+      },
+      {
+        "exercise_name": "행잉 레그 레이즈",
+        "source": "official",
+        "part": "PART6",
+        "sets": 3,
+        "target_reps": 15
+      }
+    ],
+    "created_at": "2026-08-24T21:17:52.155000",
+    "updated_at": "2026-08-24T21:17:52.155000"
+  }
+]

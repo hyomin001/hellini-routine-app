@@ -1,16 +1,16 @@
 {
-  "backed_up_at": "2026-08-24T15:26:29.726867+00:00",
+  "backed_up_at": "2026-08-25T15:31:24.671056+00:00",
   "db_name": "hellini_routine",
   "counts": {
     "users": 7,
-    "logs": 30,
+    "logs": 36,
     "cardio_logs": 2,
     "inquiries": 1,
     "posts": 3,
-    "routines": 0,
+    "routines": 1,
     "weekly_plans": 1,
     "body_metrics": 1,
     "exercise_catalog": 0,
-    "workout_sessions": 1
+    "workout_sessions": 2
   }
 }
