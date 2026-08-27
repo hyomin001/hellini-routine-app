@@ -7,7 +7,7 @@ import datetime as dt
 import streamlit as st
 
 from utils import db
-from utils.data import PARTS, PART_PRESETS
+from utils.data import PARTS, PART_PRESETS, PART_PRESETS_BY_KEY, PART_COLORS, EX_BY_NAME, random_exercise_for_part
 from utils.training import (
     estimate_one_rep_max,
     progression_recommendation,
@@ -33,8 +33,16 @@ def _start_session(user: dict, routine: dict, date_str: str):
     st.rerun()
 
 
-def render_today_routine_launcher(user: dict, date_str: str):
-    """오늘 화면 상단에서 저장 루틴을 불러오거나 세션을 시작한다."""
+def render_today_start_hub(user: dict, date_str: str):
+    """오늘 화면 상단 진입점 - '나만의 루틴 시작하기'와 '오늘 뭐 할지 정하기'를
+    하나의 흐름으로 합쳤다.
+    메인 흐름: 전신/상체/하체 같은 목표만 고르면 부위·종목 수까지 알아서 정해서 추천.
+    '다른 방법으로 정하기'를 펼치면: 저장한 루틴에서 시작 / 내가 직접 고르기 / 웜업 중 1개만 추천.
+    선택 결과는 st.session_state["quick_pick"]에 저장되고, 아래 부위 탭에서
+    '선택한 운동만 보기'를 켜면 그 운동들만 걸러서 보여준다."""
+    st.session_state.setdefault("quick_pick", [])
+    st.session_state.setdefault("quick_filter_on", False)
+
     routines = db.list_routines(user["id"])
     active = db.get_active_workout_session(user["id"])
     plan = db.get_weekly_plan(user["id"])
@@ -45,8 +53,15 @@ def render_today_routine_launcher(user: dict, date_str: str):
     scheduled_id = plan.get(str(weekday))
     scheduled = next((r for r in routines if str(r["_id"]) == str(scheduled_id)), None)
 
+    catalog = db.get_exercise_catalog(user["id"])
+    available_exercise_names = [item["name"] for item in catalog]
+    valid_quick_pick = [name for name in st.session_state["quick_pick"] if name in available_exercise_names]
+    part_labels = {f"{p['label']} · {p['part']}": p["key"] for p in PARTS}
+    part_name_by_key = {p["key"]: p["part"] for p in PARTS}
+
     with st.container(border=True):
-        st.markdown("**🧩 나만의 루틴**")
+        st.markdown("**🧩 오늘 뭐 할지 정하기**")
+
         if active:
             done = len(active.get("completed_indexes", []))
             total = len(active.get("items", []))
@@ -56,35 +71,194 @@ def render_today_routine_launcher(user: dict, date_str: str):
                 st.session_state["page"] = "session"
                 st.rerun()
             return
+
         if scheduled:
             st.caption(f"📅 {WEEKDAYS[weekday]} 계획: {scheduled['name']}")
-        if not routines:
-            st.caption("저장한 루틴이 없어요. 루틴 메뉴에서 자주 하는 운동을 묶어보세요.")
-            if st.button("첫 루틴 만들기", use_container_width=True, key="today_make_routine"):
-                st.session_state["page"] = "routines"
-                st.session_state["routine_section"] = "➕ 루틴 만들기"
-                st.rerun()
-            return
+        st.caption("몇 부위, 몇 종목 할지 몰라도 괜찮아요. 목표만 고르면 알아서 골라드려요.")
 
-        ids = [str(r["_id"]) for r in routines]
-        default_id = str(scheduled["_id"]) if scheduled else ids[0]
-        selected_id = st.selectbox(
-            "오늘 할 루틴",
-            ids,
-            index=ids.index(default_id),
-            format_func=lambda rid: _routine_label(next(r for r in routines if str(r["_id"]) == rid)),
-            key=f"today_routine_{date_str}",
-        )
-        routine = next(r for r in routines if str(r["_id"]) == selected_id)
-        c1, c2 = st.columns(2)
-        if c1.button("오늘 화면에 불러오기", use_container_width=True, key=f"load_routine_{date_str}"):
-            st.session_state["quick_pick"] = [item["exercise_name"] for item in routine.get("items", [])]
-            st.session_state["quick_filter_on"] = True
-            st.session_state["loaded_routine_id"] = selected_id
-            st.toast(f"{routine['name']}을 불러왔어요.", icon="✅")
-            st.rerun()
-        if c2.button("순서대로 시작", use_container_width=True, type="primary", key=f"start_routine_{date_str}"):
-            _start_session(user, routine, date_str)
+        preset_buttons = list(PART_PRESETS) + [
+            {"key": "custom", "label": "부위 직접 선택", "emoji": "🛠", "minutes": None}
+        ]
+        for row_start in range(0, len(preset_buttons), 2):
+            row = preset_buttons[row_start:row_start + 2]
+            with st.container(key=f"evenrow_todaypreset_row{row_start // 2}"):
+                row_cols = st.columns(2)
+                for col, preset in zip(row_cols, row):
+                    label = (
+                        f"{preset['emoji']} {preset['label']} · ~{preset['minutes']}분"
+                        if preset.get("minutes") else f"{preset['emoji']} {preset['label']}"
+                    )
+                    if col.button(label, key=f"today_preset_{preset['key']}", use_container_width=True):
+                        st.session_state["quick_preset_selected"] = preset["key"]
+                        st.session_state.pop("quick_preset_items", None)
+
+        selected_preset_key = st.session_state.get("quick_preset_selected")
+        chosen_parts, target_minutes = [], 40
+
+        if selected_preset_key == "custom":
+            chosen_labels = st.multiselect(
+                "운동할 부위 (여러 개 선택 가능)", list(part_labels.keys()), key="quick_custom_parts",
+            )
+            chosen_parts = [part_labels[label] for label in chosen_labels]
+            target_minutes = st.slider("목표 운동 시간(분)", 10, 90, 40, step=5, key="quick_custom_minutes")
+            if st.button(
+                "이 조건으로 추천받기", type="primary", use_container_width=True,
+                key="quick_custom_go", disabled=not chosen_parts,
+            ):
+                st.session_state["quick_preset_items"] = recommend_routine_for_minutes(catalog, chosen_parts, target_minutes)
+                st.rerun()
+        elif selected_preset_key:
+            preset = PART_PRESETS_BY_KEY[selected_preset_key]
+            chosen_parts, target_minutes = preset["parts"], preset["minutes"]
+            st.caption(f"{preset['desc']} · 약 {preset['minutes']}분 기준으로 종목 수를 자동으로 정했어요.")
+            if "quick_preset_items" not in st.session_state:
+                st.session_state["quick_preset_items"] = recommend_routine_for_minutes(catalog, chosen_parts, target_minutes)
+
+        items = st.session_state.get("quick_preset_items") or []
+        if items:
+            for item in items:
+                color = PART_COLORS.get(item.get("part"), "#FFC834")
+                part_name = part_name_by_key.get(item.get("part"), "")
+                st.markdown(
+                    f"<div style='background:#1B1D22; border:1px solid {color}; border-radius:10px; "
+                    f"padding:8px 12px; margin-top:6px;'>"
+                    f"<span class='part-badge' style='background:{color};'>{part_name}</span> "
+                    f"<b style='color:#F2F1EC;'>{item['name']}</b> "
+                    f"<span style='color:#9296A0; font-size:12px;'>· {item.get('sets', 3)}세트 · {item.get('reps', '')}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with st.container(key="evenrow_todaypreset_actions"):
+                pc1, pc2 = st.columns(2)
+                if pc1.button("🔁 다시 추천", key="quick_preset_reshuffle", use_container_width=True):
+                    st.session_state["quick_preset_items"] = recommend_routine_for_minutes(catalog, chosen_parts, target_minutes)
+                    st.rerun()
+                if pc2.button("➕ 오늘 화면에 담기", key="quick_preset_add", use_container_width=True):
+                    names = [it["name"] for it in items]
+                    st.session_state["quick_pick"] = list(dict.fromkeys(st.session_state["quick_pick"] + names))
+                    st.session_state["quick_filter_on"] = True
+                    st.toast(f"{len(names)}개 운동을 오늘의 루틴에 추가했어요!", icon="🎯")
+                    st.rerun()
+            if st.button("🚀 이 루틴으로 바로 시작", type="primary", use_container_width=True, key="quick_preset_start"):
+                preset_label = (
+                    PART_PRESETS_BY_KEY[selected_preset_key]["label"]
+                    if selected_preset_key in PART_PRESETS_BY_KEY else "직접 선택"
+                )
+                _start_session(user, {"name": f"{preset_label} 루틴", "items": items}, date_str)
+        elif selected_preset_key and selected_preset_key != "custom":
+            st.info("추천할 운동이 없어요. 다른 목표를 선택해보세요.")
+
+        with st.expander("다른 방법으로 정하기 (저장한 루틴 · 직접 고르기 · 1개만 추천)", expanded=False):
+            sub_mode = st.radio(
+                "방법 선택",
+                ["📁 저장한 루틴에서 시작", "✅ 내가 직접 고르기", "🎲 웜업 중 딱 1개만"],
+                key="today_sub_mode", horizontal=False, label_visibility="collapsed",
+            )
+
+            if sub_mode == "📁 저장한 루틴에서 시작":
+                if not routines:
+                    st.caption("저장한 루틴이 없어요. 루틴 메뉴에서 자주 하는 운동을 묶어보세요.")
+                    if st.button("첫 루틴 만들기", use_container_width=True, key="today_make_routine"):
+                        st.session_state["page"] = "routines"
+                        st.session_state["routine_section"] = "➕ 루틴 만들기"
+                        st.rerun()
+                else:
+                    ids = [str(r["_id"]) for r in routines]
+                    default_id = str(scheduled["_id"]) if scheduled else ids[0]
+                    selected_id = st.selectbox(
+                        "오늘 할 루틴", ids, index=ids.index(default_id),
+                        format_func=lambda rid: _routine_label(next(r for r in routines if str(r["_id"]) == rid)),
+                        key=f"today_routine_{date_str}",
+                    )
+                    routine = next(r for r in routines if str(r["_id"]) == selected_id)
+                    with st.container(key=f"evenrow_todayroutine_{date_str}"):
+                        c1, c2 = st.columns(2)
+                        if c1.button("오늘 화면에 불러오기", use_container_width=True, key=f"load_routine_{date_str}"):
+                            st.session_state["quick_pick"] = [item["exercise_name"] for item in routine.get("items", [])]
+                            st.session_state["quick_filter_on"] = True
+                            st.session_state["loaded_routine_id"] = selected_id
+                            st.toast(f"{routine['name']}을 불러왔어요.", icon="✅")
+                            st.rerun()
+                        if c2.button("순서대로 시작", use_container_width=True, type="primary", key=f"start_routine_{date_str}"):
+                            _start_session(user, routine, date_str)
+
+            elif sub_mode == "✅ 내가 직접 고르기":
+                st.caption("오늘 할 운동만 체크하면, 아래 부위 탭에서 그 운동들만 골라서 보여줘요.")
+                picked = st.multiselect(
+                    "오늘 할 운동", available_exercise_names, default=valid_quick_pick, key="quick_multiselect",
+                )
+                with st.container(key="evenrow_quickpick_btns"):
+                    c1, c2 = st.columns(2)
+                    if c1.button("이 운동들로 오늘 루틴 만들기", key="quick_apply", use_container_width=True, type="primary"):
+                        st.session_state["quick_pick"] = picked
+                        st.session_state["quick_filter_on"] = True
+                        st.toast(f"{len(picked)}개 운동으로 오늘의 루틴을 만들었어요!", icon="🎯")
+                        st.rerun()
+                    if c2.button("전체 다시 보기", key="quick_reset", use_container_width=True):
+                        st.session_state["quick_pick"] = []
+                        st.session_state["quick_filter_on"] = False
+                        st.rerun()
+
+            else:
+                st.caption("부위만 고르면 그 안에서 하나를 무작위로 뽑아서 방법까지 설명해드려요. (웜업하면서 딱 1개만 빨리 정하고 싶을 때)")
+                picked_label = st.selectbox("부위 선택", list(part_labels.keys()), key="quick_part_select")
+                part_key = part_labels[picked_label]
+
+                if st.button("🎲 랜덤 추천받기", key="quick_recommend_btn", use_container_width=True):
+                    rec = random_exercise_for_part(part_key)
+                    st.session_state["quick_recommend"] = rec["name"] if rec else None
+                    st.rerun()
+
+                rec_name = st.session_state.get("quick_recommend")
+                rec_ex = EX_BY_NAME.get(rec_name) if rec_name else None
+                if rec_ex:
+                    color = PART_COLORS.get(rec_ex["part"], "#FFC834")
+                    st.markdown(
+                        f"<div style='background:#1B1D22; border:1px solid {color}; border-radius:12px; "
+                        f"padding:12px; margin-top:8px;'>"
+                        f"<div class='part-badge' style='background:{color};'>오늘의 추천</div>"
+                        f"<div style='font-size:16px; font-weight:800; color:#F2F1EC;'>{rec_ex['name']}</div>"
+                        f"<div class='equip-line'>🎯 {rec_ex['sets']}세트 · {rec_ex['reps']}</div>"
+                        f"<div class='equip-line'>🛠️ {rec_ex['equip']}</div>"
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if rec_ex.get("howto"):
+                        steps_md = "\n".join(f"{i+1}. {s}" for i, s in enumerate(rec_ex["howto"]))
+                        st.markdown(steps_md)
+                    if rec_ex.get("caution"):
+                        st.markdown(
+                            f"<div class='caution-box'>⚠️ <b>주의사항</b><br>{rec_ex['caution']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    if rec_ex.get("tip"):
+                        st.markdown(
+                            f"<div class='tip-box'>💡 <b>팁</b><br>{rec_ex['tip']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with st.container(key="evenrow_quickrec_btns"):
+                        rc1, rc2 = st.columns(2)
+                        if rc1.button("🔁 다른 운동 추천", key="quick_recommend_again", use_container_width=True):
+                            rec = random_exercise_for_part(part_key)
+                            st.session_state["quick_recommend"] = rec["name"] if rec else None
+                            st.rerun()
+                        if rc2.button("➕ 오늘 운동에 추가", key="quick_recommend_add", use_container_width=True, type="primary"):
+                            if rec_ex["name"] not in st.session_state["quick_pick"]:
+                                st.session_state["quick_pick"] = st.session_state["quick_pick"] + [rec_ex["name"]]
+                            st.session_state["quick_filter_on"] = True
+                            st.toast(f"{rec_ex['name']}을(를) 오늘의 루틴에 추가했어요!", icon="✅")
+                            st.rerun()
+
+        if st.session_state["quick_pick"]:
+            names_txt = ", ".join(st.session_state["quick_pick"])
+            st.markdown(
+                f"<div class='tip-box'>🎯 <b>오늘의 선택 운동</b> ({len(st.session_state['quick_pick'])}개)<br>{names_txt}</div>",
+                unsafe_allow_html=True,
+            )
+            st.session_state["quick_filter_on"] = st.toggle(
+                "✅ 선택한 운동만 보기 (끄면 부위 전체 다시 보여요)",
+                value=st.session_state["quick_filter_on"], key="quick_filter_toggle",
+            )
 
 
 def _set_builder(routine: dict | None = None):
