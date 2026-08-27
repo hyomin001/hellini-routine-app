@@ -35,6 +35,7 @@ from utils import db
 from utils import ui
 from utils import card
 from utils import features_ui
+from utils.training import recommend_routine_for_minutes
 from utils.data import (
     PARTS,
     EX_BY_NAME,
@@ -46,6 +47,8 @@ from utils.data import (
     CARDIO_EXERCISES,
     CARDIO_EX_BY_NAME,
     CARDIO_NOTE,
+    PART_PRESETS,
+    PART_PRESETS_BY_KEY,
     format_pace,
     parse_duration,
     split_duration,
@@ -480,20 +483,27 @@ def render_topnav(user: dict, admin: bool) -> str:
     return current
 
 # ================= 오늘 뭐 할지 정하기 (퀵스타트) =================
+def _generate_preset_items(catalog: list[dict], part_keys: list[str], target_minutes: int) -> list[dict]:
+    return recommend_routine_for_minutes(catalog, part_keys, target_minutes)
+
+
 def render_quick_start(user: dict):
     """운동 가는 길 / 웜업·스트레칭 중에 '오늘 뭐 하지' 고민을 풀어주는 칸.
     1) 직접 원하는 운동만 골라서 '오늘의 운동'으로 좁혀보기
-    2) 부위만 고르면 그 부위 안에서 하나를 무작위로 추천 + 방법 설명
+    2) 전신/상체/하체 같은 목표만 고르면 부위·종목 수까지 알아서 정해서 여러 개 추천
+    3) 웜업 중 딱 1개만 무작위로 추천 + 방법 설명
     선택 결과는 st.session_state["quick_pick"]에 저장되고, 아래 부위 탭에서
     '선택한 운동만 보기'를 켜면 그 운동들만 걸러서 보여준다."""
     st.session_state.setdefault("quick_pick", [])
     st.session_state.setdefault("quick_filter_on", False)
-    available_exercise_names = [item["name"] for item in db.get_exercise_catalog(user["id"])]
+    catalog = db.get_exercise_catalog(user["id"])
+    available_exercise_names = [item["name"] for item in catalog]
     valid_quick_pick = [name for name in st.session_state["quick_pick"] if name in available_exercise_names]
 
     with st.expander("🎯 오늘 뭐 할지 아직 못 정했다면 (가는 길 / 웜업 중 추천)", expanded=False):
         mode = st.radio(
-            "방법 선택", ["✅ 내가 직접 고르기", "🎲 부위 골라서 무작위 추천받기"],
+            "방법 선택",
+            ["✅ 내가 직접 고르기", "🎯 목표로 알아서 추천받기", "🎲 웜업 중 딱 1개만"],
             key="quick_mode", horizontal=False, label_visibility="collapsed",
         )
 
@@ -514,8 +524,79 @@ def render_quick_start(user: dict):
                     st.session_state["quick_pick"] = []
                     st.session_state["quick_filter_on"] = False
                     st.rerun()
+
+        elif mode == "🎯 목표로 알아서 추천받기":
+            st.caption("몇 부위, 몇 종목 할지 몰라도 괜찮아요. 오늘 목표만 고르면 종목 수까지 알아서 정해드려요.")
+            preset_buttons = list(PART_PRESETS) + [
+                {"key": "custom", "label": "부위 직접 선택", "emoji": "🛠", "minutes": None}
+            ]
+            for row_start in range(0, len(preset_buttons), 2):
+                row = preset_buttons[row_start:row_start + 2]
+                with st.container(key=f"evenrow_preset_row{row_start // 2}"):
+                    row_cols = st.columns(2)
+                    for col, preset in zip(row_cols, row):
+                        label = (
+                            f"{preset['emoji']} {preset['label']} · ~{preset['minutes']}분"
+                            if preset.get("minutes") else f"{preset['emoji']} {preset['label']}"
+                        )
+                        if col.button(label, key=f"preset_{preset['key']}", use_container_width=True):
+                            st.session_state["quick_preset_selected"] = preset["key"]
+                            st.session_state.pop("quick_preset_items", None)
+
+            selected_preset_key = st.session_state.get("quick_preset_selected")
+            chosen_parts, target_minutes = [], 40
+
+            if selected_preset_key == "custom":
+                part_labels = {f"{p['label']} · {p['part']}": p["key"] for p in PARTS}
+                chosen_labels = st.multiselect(
+                    "운동할 부위 (여러 개 선택 가능)", list(part_labels.keys()), key="quick_custom_parts",
+                )
+                chosen_parts = [part_labels[label] for label in chosen_labels]
+                target_minutes = st.slider("목표 운동 시간(분)", 10, 90, 40, step=5, key="quick_custom_minutes")
+                if st.button(
+                    "이 조건으로 추천받기", type="primary", use_container_width=True,
+                    key="quick_custom_go", disabled=not chosen_parts,
+                ):
+                    st.session_state["quick_preset_items"] = _generate_preset_items(catalog, chosen_parts, target_minutes)
+                    st.rerun()
+            elif selected_preset_key:
+                preset = PART_PRESETS_BY_KEY[selected_preset_key]
+                chosen_parts, target_minutes = preset["parts"], preset["minutes"]
+                st.caption(f"{preset['desc']} · 약 {preset['minutes']}분 기준으로 종목 수를 자동으로 정했어요.")
+                if "quick_preset_items" not in st.session_state:
+                    st.session_state["quick_preset_items"] = _generate_preset_items(catalog, chosen_parts, target_minutes)
+
+            items = st.session_state.get("quick_preset_items") or []
+            part_name_by_key = {p["key"]: p["part"] for p in PARTS}
+            if items:
+                for item in items:
+                    color = PART_COLORS.get(item.get("part"), "#FFC834")
+                    part_name = part_name_by_key.get(item.get("part"), "")
+                    st.markdown(
+                        f"<div style='background:#1B1D22; border:1px solid {color}; border-radius:10px; "
+                        f"padding:8px 12px; margin-top:6px;'>"
+                        f"<span class='part-badge' style='background:{color};'>{part_name}</span> "
+                        f"<b style='color:#F2F1EC;'>{item['name']}</b> "
+                        f"<span style='color:#9296A0; font-size:12px;'>· {item.get('sets', 3)}세트 · {item.get('reps', '')}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                with st.container(key="evenrow_quickpreset_btns"):
+                    pc1, pc2 = st.columns(2)
+                    if pc1.button("🔁 전체 다시 추천", key="quick_preset_reshuffle", use_container_width=True):
+                        st.session_state["quick_preset_items"] = _generate_preset_items(catalog, chosen_parts, target_minutes)
+                        st.rerun()
+                    if pc2.button("➕ 전체 오늘 운동에 추가", type="primary", key="quick_preset_add", use_container_width=True):
+                        names = [it["name"] for it in items]
+                        st.session_state["quick_pick"] = list(dict.fromkeys(st.session_state["quick_pick"] + names))
+                        st.session_state["quick_filter_on"] = True
+                        st.toast(f"{len(names)}개 운동을 오늘의 루틴에 추가했어요!", icon="🎯")
+                        st.rerun()
+            elif selected_preset_key and selected_preset_key != "custom":
+                st.info("추천할 운동이 없어요. 다른 목표를 선택해보세요.")
+
         else:
-            st.caption("부위만 고르면 그 안에서 하나를 무작위로 뽑아서 방법까지 설명해드려요.")
+            st.caption("부위만 고르면 그 안에서 하나를 무작위로 뽑아서 방법까지 설명해드려요. (웜업하면서 딱 1개만 빨리 정하고 싶을 때)")
             part_labels = {f"{p['label']} · {p['part']}": p["key"] for p in PARTS}
             picked_label = st.selectbox("부위 선택", list(part_labels.keys()), key="quick_part_select")
             part_key = part_labels[picked_label]

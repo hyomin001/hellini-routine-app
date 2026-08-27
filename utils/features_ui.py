@@ -7,11 +7,12 @@ import datetime as dt
 import streamlit as st
 
 from utils import db
-from utils.data import PARTS
+from utils.data import PARTS, PART_PRESETS
 from utils.training import (
     estimate_one_rep_max,
     progression_recommendation,
     recommend_exercises,
+    recommend_routine_for_minutes,
     volume_by_part,
     weekly_training_summary,
 )
@@ -96,56 +97,85 @@ def _set_builder(routine: dict | None = None):
     st.session_state["routine_pending_catalog"] = [item["exercise_name"] for item in routine.get("items", [])]
 
 
+def _apply_generated_rows(rows: list[dict], routine_name: str):
+    """추천 결과를 루틴 초안(세션 상태)에 채워 넣고 화면을 새로고침한다."""
+    st.session_state["routine_draft_items"] = [
+        {
+            "exercise_name": item["name"],
+            "source": "official",
+            "part": item.get("part", "PART1"),
+            "sets": item.get("sets", 3),
+            "target_reps": item.get("target_reps", 10),
+        }
+        for item in rows
+    ]
+    if not st.session_state.get("routine_draft_name"):
+        st.session_state["routine_draft_name"] = routine_name
+    st.session_state["routine_name_input"] = st.session_state["routine_draft_name"]
+    st.session_state["routine_builder_nonce"] = st.session_state.get("routine_builder_nonce", 0) + 1
+    # 추천 결과와 멀티셀렉트의 프론트엔드 상태를 함께 맞춰야
+    # 세트/횟수 변경으로 재실행돼도 추천 카드가 사라지지 않는다.
+    st.session_state["routine_catalog_select"] = [item["name"] for item in rows]
+    st.rerun()
+
+
 def _render_beginner_generator(catalog: list[dict]):
-    """운동 이름을 모르는 사용자가 부위와 종목 수만으로 초안을 만든다."""
+    """운동 부위·종목을 모르는 사용자가 목표(전신/상체/하체)만 골라 루틴 초안을 만든다.
+    '오늘 뭐 할지 정하기'와 같은 추천 로직(recommend_routine_for_minutes)을 그대로 써서
+    두 화면의 추천 방식이 갈라지지 않게 한다. 세밀하게 직접 고르고 싶으면 아래에서 펼칠 수 있다."""
     with st.container(border=True):
-        st.markdown("**🎲 초보자 자동 추천**")
-        st.caption("운동할 부위와 종목 수만 고르면 공식 운동 중에서 자동으로 골라드려요.")
-        part_keys = [part["key"] for part in PARTS]
-        selected_parts = st.multiselect(
-            "오늘 운동할 부위",
-            part_keys,
-            default=[part_keys[0]],
-            format_func=lambda key: PART_NAMES[key],
-            key="beginner_recommend_parts",
-        )
-        available = [
-            item for item in catalog
-            if item.get("source") == "official" and item.get("active", True) and item.get("part") in selected_parts
+        st.markdown("**🎲 자동 추천으로 초안 만들기**")
+        st.caption("몇 부위, 몇 종목 할지 몰라도 괜찮아요. 목표만 고르면 알아서 채워드려요.")
+        preset_buttons = list(PART_PRESETS) + [
+            {"key": "custom", "label": "부위 직접 선택", "emoji": "🛠", "minutes": None}
         ]
-        max_count = min(10, len(available))
-        if max_count:
-            exercise_count = st.number_input(
-                "몇 종목 할까요?",
-                min_value=1,
-                max_value=max_count,
-                value=min(4, max_count),
-                step=1,
-                help="처음이라면 한 부위당 3~4종목 정도로 시작해보세요.",
+        for row_start in range(0, len(preset_buttons), 2):
+            row = preset_buttons[row_start:row_start + 2]
+            with st.container(key=f"evenrow_routine_preset_row{row_start // 2}"):
+                row_cols = st.columns(2)
+                for col, preset in zip(row_cols, row):
+                    label = (
+                        f"{preset['emoji']} {preset['label']} · ~{preset['minutes']}분"
+                        if preset.get("minutes") else f"{preset['emoji']} {preset['label']}"
+                    )
+                    if col.button(label, key=f"routine_preset_{preset['key']}", use_container_width=True):
+                        if preset["key"] == "custom":
+                            st.session_state["routine_beginner_custom_open"] = not st.session_state.get(
+                                "routine_beginner_custom_open", False
+                            )
+                        else:
+                            rows = recommend_routine_for_minutes(catalog, preset["parts"], preset["minutes"])
+                            _apply_generated_rows(rows, f"{preset['label']} 루틴")
+
+        if st.session_state.get("routine_beginner_custom_open"):
+            part_keys = [part["key"] for part in PARTS]
+            selected_parts = st.multiselect(
+                "오늘 운동할 부위",
+                part_keys,
+                default=[part_keys[0]],
+                format_func=lambda key: PART_NAMES[key],
+                key="beginner_recommend_parts",
             )
-            if st.button("이 조건으로 랜덤 추천받기", type="primary", use_container_width=True):
-                rows = recommend_exercises(catalog, selected_parts, int(exercise_count))
-                st.session_state["routine_draft_items"] = [
-                    {
-                        "exercise_name": item["name"],
-                        "source": "official",
-                        "part": item.get("part", "PART1"),
-                        "sets": item.get("sets", 3),
-                        "target_reps": item.get("target_reps", 10),
-                    }
-                    for item in rows
-                ]
-                if not st.session_state.get("routine_draft_name"):
+            available = [
+                item for item in catalog
+                if item.get("source") == "official" and item.get("active", True) and item.get("part") in selected_parts
+            ]
+            max_count = min(10, len(available))
+            if max_count:
+                exercise_count = st.number_input(
+                    "몇 종목 할까요?",
+                    min_value=1,
+                    max_value=max_count,
+                    value=min(4, max_count),
+                    step=1,
+                    help="처음이라면 한 부위당 3~4종목 정도로 시작해보세요.",
+                )
+                if st.button("이 조건으로 랜덤 추천받기", type="primary", use_container_width=True):
+                    rows = recommend_exercises(catalog, selected_parts, int(exercise_count))
                     part_text = "·".join(PART_NAMES[key] for key in selected_parts)
-                    st.session_state["routine_draft_name"] = f"{part_text} 추천 루틴"
-                st.session_state["routine_name_input"] = st.session_state["routine_draft_name"]
-                st.session_state["routine_builder_nonce"] = st.session_state.get("routine_builder_nonce", 0) + 1
-                # 추천 결과와 멀티셀렉트의 프론트엔드 상태를 함께 맞춰야
-                # 세트/횟수 변경으로 재실행돼도 추천 카드가 사라지지 않는다.
-                st.session_state["routine_catalog_select"] = [item["name"] for item in rows]
-                st.rerun()
-        else:
-            st.info("운동할 부위를 하나 이상 선택해주세요.")
+                    _apply_generated_rows(rows, f"{part_text} 추천 루틴")
+            else:
+                st.info("운동할 부위를 하나 이상 선택해주세요.")
 
 
 def _render_routine_builder(user: dict):

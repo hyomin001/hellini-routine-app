@@ -180,8 +180,47 @@ def recommend_exercises(catalog: Iterable[dict], part_keys: Iterable[str], count
         rng.shuffle(rows)
 
     picked = []
+    picked_names = set()
     while len(picked) < count and any(groups.values()):
+        progressed = False
         for part in parts:
-            if groups[part] and len(picked) < count:
-                picked.append(groups[part].pop())
+            if len(picked) >= count:
+                break
+            rows = groups[part]
+            # 같은 운동이 여러 부위에 걸쳐 있을 수 있으므로(예: 딥스=가슴+팔),
+            # 전신처럼 여러 부위를 한 번에 추천할 때 같은 종목이 중복으로 뽑히지 않게 한다.
+            while rows and rows[-1]["name"] in picked_names:
+                rows.pop()
+            if rows:
+                item = rows.pop()
+                picked.append(item)
+                picked_names.add(item["name"])
+                progressed = True
+        if not progressed:
+            break
     return picked
+
+
+def estimate_exercise_count(target_minutes: int, part_count: int, minutes_per_exercise: float = 6.0) -> int:
+    """목표 운동 시간(분)을 세트+휴식 포함 종목 수로 환산한다.
+    적어도 각 부위에 1종목씩은 들어가도록 최소값을 보장한다."""
+    part_count = max(1, int(part_count or 1))
+    target_minutes = max(0, int(target_minutes or 0))
+    raw = round(target_minutes / minutes_per_exercise) if target_minutes else 0
+    return max(part_count, raw)
+
+
+def recommend_routine_for_minutes(
+    catalog: Iterable[dict],
+    part_keys: Iterable[str],
+    target_minutes: int,
+    rng=None,
+    minutes_per_exercise: float = 6.0,
+) -> list[dict]:
+    """'전신 60분 하고 싶다' 같은 목표 시간만으로, 부위별 종목 수까지 자동으로 정해서 추천한다.
+    사용자가 부위마다 몇 종목 할지 직접 고르지 않아도 되게 하는 것이 목적."""
+    parts = list(dict.fromkeys(str(key) for key in part_keys or [] if key))
+    if not parts:
+        return []
+    count = estimate_exercise_count(target_minutes, len(parts), minutes_per_exercise)
+    return recommend_exercises(catalog, parts, count, rng=rng)
