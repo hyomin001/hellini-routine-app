@@ -126,5 +126,89 @@
     "started_at": "2026-08-24T21:44:38.501000",
     "updated_at": "2026-08-24T21:46:41.687000",
     "completed_at": "2026-08-24T21:46:41.687000"
+  },
+  {
+    "_id": "6a911630ad7c1df9f102b4f3",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "routine_id": "",
+    "routine_name": "전신 루틴",
+    "date": "2026-08-28",
+    "items": [
+      {
+        "exercise_name": "플랫 벤치 프레스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 4,
+        "target_reps": 10
+      },
+      {
+        "exercise_name": "풀업 (턱걸이)",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 10
+      },
+      {
+        "exercise_name": "덤벨 숄더 프레스",
+        "source": "official",
+        "part": "PART3",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "덤벨 해머 컬",
+        "source": "official",
+        "part": "PART4",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "레그 컬",
+        "source": "official",
+        "part": "PART5",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "플랭크",
+        "source": "official",
+        "part": "PART6",
+        "sets": 3,
+        "target_reps": 60
+      },
+      {
+        "exercise_name": "인클라인 덤벨 프레스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "랫 풀 다운",
+        "source": "official",
+        "part": "PART2",
+        "sets": 4,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "사이드 레터럴 레이즈",
+        "source": "official",
+        "part": "PART3",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "라잉 트라이셉스 익스텐션",
+        "source": "official",
+        "part": "PART4",
+        "sets": 3,
+        "target_reps": 12
+      }
+    ],
+    "completed_indexes": [],
+    "current_index": 0,
+    "status": "active",
+    "started_at": "2026-08-28T05:01:36.596000",
+    "updated_at": "2026-08-28T05:01:36.596000"
   }
 ]
