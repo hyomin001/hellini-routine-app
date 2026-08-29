@@ -1,9 +1,9 @@
 {
-  "backed_up_at": "2026-08-28T23:43:53.743665+00:00",
+  "backed_up_at": "2026-08-29T17:56:55.087491+00:00",
   "db_name": "hellini_routine",
   "counts": {
     "users": 7,
-    "logs": 36,
+    "logs": 43,
     "cardio_logs": 4,
     "inquiries": 1,
     "posts": 3,
