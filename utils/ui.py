@@ -352,6 +352,11 @@ def render_log_entry_editable(user: dict, e: dict):
                 st.rerun()
     else:
         st.markdown(f"**{e['exercise_name']}** 수정 중")
+        try:
+            cur_date = _dt.date.fromisoformat(e["date"])
+        except (TypeError, ValueError):
+            cur_date = _dt.date.today()
+        new_date = st.date_input("날짜", value=cur_date, key=f"edit_date_{entry_id}")
         new_sets = []
         for i, s in enumerate(e["sets"]):
             with st.container(key=f"setrow_edit_{entry_id}_{i}"):
@@ -380,6 +385,9 @@ def render_log_entry_editable(user: dict, e: dict):
                     st.error(err)
                 else:
                     db.save_exercise_log(user["id"], e["date"], e["exercise_name"], new_sets, memo_val)
+                    new_date_str = new_date.isoformat()
+                    if new_date_str != e["date"]:
+                        db.move_log_date(user["id"], entry_id, new_date_str)
                     st.session_state[edit_key] = False
                     st.toast(f"{e['exercise_name']} 수정 완료!", icon="✅")
                     st.rerun()
@@ -419,6 +427,11 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
                 st.rerun()
     else:
         st.markdown(f"**{icon} {c['exercise_name']}** 수정 중")
+        try:
+            cur_cdate = _dt.date.fromisoformat(c["date"])
+        except (TypeError, ValueError):
+            cur_cdate = _dt.date.today()
+        new_cdate = st.date_input("날짜", value=cur_cdate, key=f"cedit_date_{entry_id}")
 
         min_val, sec_val = split_duration(c.get("duration_min"))
         label_cols_n = 3 if has_distance else 2
@@ -476,6 +489,9 @@ def render_cardio_log_entry_editable(user: dict, c: dict):
                             user["id"], c["date"], c["exercise_name"],
                             dur_val, dist_val if has_distance else None, cal_val, memo_val,
                         )
+                        new_cdate_str = new_cdate.isoformat()
+                        if new_cdate_str != c["date"]:
+                            db.move_cardio_log_date(user["id"], entry_id, new_cdate_str)
                         st.session_state[edit_key] = False
                         st.toast(f"{c['exercise_name']} 수정 완료!", icon="✅")
                         st.rerun()

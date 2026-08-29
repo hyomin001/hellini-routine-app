@@ -312,6 +312,44 @@ def delete_log(user_id: str, date_str: str, exercise_name: str):
     get_db().logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
 
 
+def move_log_date(user_id: str, entry_id: str, new_date: str):
+    """운동 기록의 날짜를 옮긴다(예: 실수로 28일로 기록한 걸 29일로 정정).
+
+    옮기려는 날짜에 같은 운동 기록이 이미 있으면 세트를 이어붙이고 메모도 합쳐서
+    하나로 병합한다(기존 기록 삭제 없이 다시 입력하는 번거로움을 없애기 위함).
+    없으면 그냥 날짜만 바꾼다."""
+    db = get_db()
+    try:
+        entry = db.logs.find_one({"_id": ObjectId(entry_id), "user_id": user_id})
+    except Exception:
+        return False, "기록을 찾을 수 없어요."
+    if not entry:
+        return False, "기록을 찾을 수 없어요."
+    if entry["date"] == new_date:
+        return True, ""
+
+    target = db.logs.find_one(
+        {"user_id": user_id, "date": new_date, "exercise_name": entry["exercise_name"]}
+    )
+    if target:
+        merged_sets = list(target.get("sets", [])) + list(entry.get("sets", []))
+        merged_memo = "\n".join(
+            m for m in [target.get("memo", ""), entry.get("memo", "")] if m and m.strip()
+        )
+        db.logs.update_one(
+            {"_id": target["_id"]},
+            {"$set": {"sets": merged_sets, "memo": merged_memo, "updated_at": datetime.utcnow()}},
+        )
+        db.logs.delete_one({"_id": entry["_id"]})
+        return True, f"{new_date} 기존 기록과 합쳐졌어요."
+    else:
+        db.logs.update_one(
+            {"_id": entry["_id"]},
+            {"$set": {"date": new_date, "updated_at": datetime.utcnow()}},
+        )
+        return True, ""
+
+
 # ================= 유산소 기록 (CARDIO LOGS) =================
 # 근력(logs)과 별도 컬렉션에 저장한다. 구조가 세트×무게×횟수가 아니라
 # "시간(분) + (있으면) 거리(km) + (선택) 칼로리 + 메모"라서 근력 로직을 그대로 못 쓴다.
@@ -405,6 +443,55 @@ def get_all_cardio_logs(user_id: str) -> list:
 def delete_cardio_log(user_id: str, date_str: str, exercise_name: str):
     """특정 날짜의 특정 유산소 운동 기록을 삭제한다."""
     get_db().cardio_logs.delete_one({"user_id": user_id, "date": date_str, "exercise_name": exercise_name})
+
+
+def move_cardio_log_date(user_id: str, entry_id: str, new_date: str):
+    """유산소 기록의 날짜를 옮긴다. 옮기려는 날짜에 같은 운동 기록이 이미 있으면
+    시간·거리·칼로리를 합산하고 메모도 합쳐서 하나로 병합한다. 없으면 날짜만 바꾼다."""
+    db = get_db()
+    try:
+        entry = db.cardio_logs.find_one({"_id": ObjectId(entry_id), "user_id": user_id})
+    except Exception:
+        return False, "기록을 찾을 수 없어요."
+    if not entry:
+        return False, "기록을 찾을 수 없어요."
+    if entry["date"] == new_date:
+        return True, ""
+
+    target = db.cardio_logs.find_one(
+        {"user_id": user_id, "date": new_date, "exercise_name": entry["exercise_name"]}
+    )
+    if target:
+        def _sum(a, b):
+            if a in (None, "") and b in (None, ""):
+                return None
+            av = float(a) if a not in (None, "") else 0.0
+            bv = float(b) if b not in (None, "") else 0.0
+            return av + bv
+
+        merged_memo = "\n".join(
+            m for m in [target.get("memo", ""), entry.get("memo", "")] if m and m.strip()
+        )
+        db.cardio_logs.update_one(
+            {"_id": target["_id"]},
+            {
+                "$set": {
+                    "duration_min": _sum(target.get("duration_min"), entry.get("duration_min")),
+                    "distance_km": _sum(target.get("distance_km"), entry.get("distance_km")),
+                    "calories": _sum(target.get("calories"), entry.get("calories")),
+                    "memo": merged_memo,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        db.cardio_logs.delete_one({"_id": entry["_id"]})
+        return True, f"{new_date} 기존 기록과 합쳐졌어요."
+    else:
+        db.cardio_logs.update_one(
+            {"_id": entry["_id"]},
+            {"$set": {"date": new_date, "updated_at": datetime.utcnow()}},
+        )
+        return True, ""
 
 
 def get_cardio_personal_records(user_id: str) -> dict:
