@@ -46,5 +46,17 @@
     "duration_min": 120.0,
     "memo": "축구",
     "updated_at": "2026-08-28T23:08:55.972000"
+  },
+  {
+    "_id": "6a95452bbc7d557f93ae6b3c",
+    "exercise_name": "러닝 (달리기)",
+    "date": "2026-08-31",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "calories": "87.6",
+    "created_at": "2026-08-31T09:11:07.017000",
+    "distance_km": "2.14",
+    "duration_min": 13.0,
+    "memo": "",
+    "updated_at": "2026-08-31T09:11:07.016000"
   }
 ]
