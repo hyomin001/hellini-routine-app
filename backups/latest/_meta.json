@@ -1,10 +1,10 @@
 {
-  "backed_up_at": "2026-09-01T18:00:45.244468+00:00",
+  "backed_up_at": "2026-09-02T18:10:30.590869+00:00",
   "db_name": "hellini_routine",
   "counts": {
     "users": 7,
     "logs": 52,
-    "cardio_logs": 5,
+    "cardio_logs": 6,
     "inquiries": 1,
     "posts": 3,
     "routines": 1,
