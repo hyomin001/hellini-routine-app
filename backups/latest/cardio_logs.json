@@ -70,5 +70,17 @@
     "duration_min": 36.583333333333336,
     "memo": "삼지일체 첫 러닝",
     "updated_at": "2026-09-02T10:29:51.550000"
+  },
+  {
+    "_id": "6a9bf2d501f01a58ffb6a2b0",
+    "exercise_name": "러닝 (달리기)",
+    "date": "2026-09-05",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "calories": null,
+    "created_at": "2026-09-05T10:45:41.546000",
+    "distance_km": null,
+    "duration_min": 240.0,
+    "memo": "축구",
+    "updated_at": "2026-09-05T10:45:41.546000"
   }
 ]
