@@ -219,5 +219,76 @@
     "started_at": "2026-08-28T05:01:36.596000",
     "updated_at": "2026-08-29T06:19:50.091000",
     "completed_at": "2026-08-29T06:19:50.091000"
+  },
+  {
+    "_id": "6a9df99ae98f9e2f0505c71c",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "routine_id": "",
+    "routine_name": "상체만 루틴",
+    "date": "2026-09-07",
+    "items": [
+      {
+        "exercise_name": "플랫 벤치 프레스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 4,
+        "target_reps": 10
+      },
+      {
+        "exercise_name": "벤트오버 바벨 로우",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "사이드 레터럴 레이즈",
+        "source": "official",
+        "part": "PART3",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "케이블 푸시다운",
+        "source": "official",
+        "part": "PART4",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "인클라인 덤벨 프레스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "데드리프트",
+        "source": "official",
+        "part": "PART2",
+        "sets": 4,
+        "target_reps": 8
+      },
+      {
+        "exercise_name": "오버헤드 프레스",
+        "source": "official",
+        "part": "PART3",
+        "sets": 4,
+        "target_reps": 12
+      }
+    ],
+    "completed_indexes": [
+      0,
+      1,
+      2,
+      4,
+      3,
+      5,
+      6
+    ],
+    "current_index": 6,
+    "status": "active",
+    "started_at": "2026-09-06T23:39:06.147000",
+    "updated_at": "2026-09-07T11:38:44.777000"
   }
 ]
