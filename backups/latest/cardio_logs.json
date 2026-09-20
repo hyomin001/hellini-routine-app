@@ -142,5 +142,17 @@
     "duration_min": 55.2,
     "memo": "동호회러닝",
     "updated_at": "2026-09-18T04:18:02.621000"
+  },
+  {
+    "_id": "6aaf24603b7b0599937dc30a",
+    "date": "2026-09-19",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "exercise_name": "러닝 (달리기)",
+    "calories": null,
+    "created_at": "2026-09-20T00:10:08.427000",
+    "distance_km": null,
+    "duration_min": 120.0,
+    "memo": "축구동호회",
+    "updated_at": "2026-09-20T00:10:08.427000"
   }
 ]

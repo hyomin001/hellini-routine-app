@@ -291,5 +291,96 @@
     "started_at": "2026-09-06T23:39:06.147000",
     "updated_at": "2026-09-10T08:18:34.550000",
     "completed_at": "2026-09-10T08:18:34.550000"
+  },
+  {
+    "_id": "6aaf250f442fca0b8e3b667a",
+    "user_id": "6a8538f8048f34947b54eab9",
+    "routine_id": "",
+    "routine_name": "직접 선택 루틴",
+    "date": "2026-09-20",
+    "items": [
+      {
+        "exercise_name": "딥스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "랫 풀 다운",
+        "source": "official",
+        "part": "PART2",
+        "sets": 4,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "벤트오버 레터럴 레이즈",
+        "source": "official",
+        "part": "PART3",
+        "sets": 3,
+        "target_reps": 20
+      },
+      {
+        "exercise_name": "팔굽혀펴기",
+        "source": "official",
+        "part": "PART1",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "벤트오버 바벨 로우",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "덤벨 숄더 프레스",
+        "source": "official",
+        "part": "PART3",
+        "sets": 3,
+        "target_reps": 12
+      },
+      {
+        "exercise_name": "플랫 벤치 프레스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 4,
+        "target_reps": 10
+      },
+      {
+        "exercise_name": "풀업 (턱걸이)",
+        "source": "official",
+        "part": "PART2",
+        "sets": 3,
+        "target_reps": 10
+      },
+      {
+        "exercise_name": "프론트 레이즈",
+        "source": "official",
+        "part": "PART3",
+        "sets": 3,
+        "target_reps": 15
+      },
+      {
+        "exercise_name": "체스트 머신 프레스",
+        "source": "official",
+        "part": "PART1",
+        "sets": 3,
+        "target_reps": 12
+      }
+    ],
+    "completed_indexes": [
+      0,
+      2,
+      1,
+      5,
+      4
+    ],
+    "current_index": 6,
+    "status": "completed",
+    "started_at": "2026-09-20T00:13:03.345000",
+    "updated_at": "2026-09-20T00:53:24.990000",
+    "completed_at": "2026-09-20T00:53:24.990000"
   }
 ]
